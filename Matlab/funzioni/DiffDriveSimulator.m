@@ -116,8 +116,8 @@ classdef DiffDriveSimulator < handle
             Vl = (obj.K_param(3) + obj.DK_param(3)) * 2*pi * NTic_l / (obj.Enc_res * dt);
             
             % Diff Drive Model
-            % [   xdot   ]   [ cos(delta + incr)/2     cos(delta + inctr)/2 ]  [  Vr  ]
-            % [   ydot   ] = [ sin(delta + inctr)/2     sin(delta+ inctr)/2 ]  [  Vl  ]
+            % [   xdot   ]   [ cos(delta + incr)/2     cos(delta + incr)/2 ]  [  Vr  ]
+            % [   ydot   ] = [ sin(delta + incr)/2     sin(delta+ incr)/2 ]  [  Vl  ]
             % [ deltadot ]   [     1/b               -1/b    ]
 
             % delta + incr = theta + T*omega/2 -> from Antonelli and Chiaverini

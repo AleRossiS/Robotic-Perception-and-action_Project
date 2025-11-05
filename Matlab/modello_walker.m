@@ -12,24 +12,20 @@ clc;
 
 addpath("data");
 addpath("funzioni");
+run("estraz_dati.m");
 
 % Baseline
-b = 0.5;
+b = 0.9;
 % Wheel radii
 R = [0.1 0.1];
 % Kinematic Parameters
 K_param = [b R];
-DK_param = 0*[0.02 0.01 0]; % deviation from ideal parameters [r, R_r R_L] credo
-
+DK_param = [0 0 0];
 
 % Robot heading
 theta0 = 0;
 % wheel encoder resolution [tic/rev]
 Enc_res = 4096;
-
-% Robot heading error
-theta0 = theta0; %+ 5*pi/180;
-
 
 % Set the current location and the goal location of the robot as defined by the path
 robotCurrentLocation = [0 0];
@@ -47,60 +43,43 @@ robot.setRobotPose(robotInitialPose);
 
 Pose0 = robot.GrabPose; % initial pose
 
-%% STEP 2a - Simulate the robot behaviour with Encoder Tics/cycle
+
+%% ENCODERS DATA EXTRACTION
+MOTION_START = 125;
+
+Ntic_R = table2array(T_synced(MOTION_START:end,"Right_ENC [tic]"));
+Ntic_L = table2array(T_synced(MOTION_START:end,"Left_ENC [tic]"));
+
+%Tic steps
+Ntic_R = diff(Ntic_R);
+Ntic_L = diff(Ntic_L);
+
+%% Simulate the robot behaviour with Encoder Tics/cycle
 
 % Define the total simulation time [s]
-Tt = 10;
+Tt = table2array(T_synced(end, "Tempo [s]"));
 
 % Define the While Loop update time [s]:
-Tc = 0.05;
+Tc = table2array(T_synced(end, "Tempo [s]")) - table2array(T_synced(end-1, "Tempo [s]"));
 % Define the current time [s]:
 T = 0;
 
+%I don't need a path
+path = [0.00  0.00; 
+        0       0];
 
-%Straigth Line
-NTic = 100 * ones(1,200);
-% NTic = [NTic -NTic];
-
-
-% --- Arco avanti + ritorno indietro ---
-N_half = 100;   % 100 step = 5 s, totale 10 s
-
-% fase avanti: arco di diametro 1 m
-NTic_r_fwd = 154 * ones(1, N_half);   % ruota destra (più veloce)
-NTic_l_fwd =  51 * ones(1, N_half);   % ruota sinistra (più lenta)
-
-% fase indietro: stesso arco ma in retro
-NTic_r_bwd = -154 * ones(1, N_half);
-NTic_l_bwd = -51  * ones(1, N_half);
-
-% unisci le due fasi
-NTic_r_all = [NTic_r_fwd NTic_r_bwd];
-NTic_l_all = [NTic_l_fwd NTic_l_bwd];
-
-
-% Define the desired/ideal path
-Vr = K_param(2) * 2*pi * NTic(2) / (Enc_res * Tc); %Vr = (distanza percorsa in Tc) / Tc
-                                                   %dist in Tc = R*2pi *(Ntic/enc_res)
-path = [0.00    0.00;
-    Vr * Tt/2    0];
-
-Nplot = 10; % plot number
-Xlim = [-1 3];
-Ylim = [-2 2];
+Nplot = 1; % plot number
+Xlim = [-2 4];
+Ylim = [-3 3];
 
 % Simulates the robot trajectory:
-for i=1:length(NTic)
+for i=1:length(Ntic_R)
      
     % MEASUREMENT: acquire the controller outputs, i.e., the inputs to the robot
-    
-    % Tic of the encoder wheels linea dritta
-    % NTic_r = NTic(i);
-    % NTic_l = NTic(i);
-    
+ 
     %Cyrcle
-    NTic_r = NTic_r_all(i); % ruota destra
-    NTic_l = NTic_l_all(i); % ruota sinistra
+    NTic_r = Ntic_R(i); % ruota destra
+    NTic_l = Ntic_L(i); % ruota sinistra
 
 
     % SIMULATION: Simulate the robot using the controller outputs.
@@ -119,13 +98,108 @@ for i=1:length(NTic)
  
 end
 
-Pose = robot.GrabPose
+Pose = robot.GrabPose;
 
 
 % Close simulation.
-delete(robot)
+% delete(robot)
 
 
+%% HTC Data
+
+x_HTC = table2array(T_synced(MOTION_START:end-1, "X_HTC [mm]"));
+y_HTC = table2array(T_synced(MOTION_START:end-1, "Y_HTC [mm]"));
+theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg
+theta_HTC = unwrap(theta_HTC); %to solve phase problems
+theta_HTC = deg2rad(theta_HTC); %rad
+
+figure(2); hold on; grid on;
+plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
+xlabel('x [mm]');
+ylabel('y [mm]');
+title('Traiettoria HTC');
+
+legend('HTC');
+axis("equal");
+
+%% Encoders data from simulation
+
+%Extract them from the simulation 
+
+x_ENC_sim = robot.actualPath(:,1);
+y_ENC_sim = robot.actualPath(:,2);
+
+figure(3); hold on; grid on;
+plot(x_ENC_sim, y_ENC_sim, 'LineWidth', 1.5, "Color", "r");
+xlabel('x [mm]');
+ylabel('y [mm]');
+title('Traiettoria Encoders');
+legend('Encoders');
+axis("equal");
 
 
+%% Encoders data from formulas
+
+% pose_Enc_formulas = [x(t) y(t) theta(t)]
+pose_Enc_formulas = EncodersMotion(K_param, Ntic_L, Ntic_R, Enc_res);
+
+x_ENC_form = pose_Enc_formulas(1,:);
+y_ENC_form = pose_Enc_formulas(2,:);
+theta_ENC_form = pose_Enc_formulas(3,:);
+
+figure(4); hold on; grid on;
+plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "g");
+plot(x_ENC_sim, y_ENC_sim, 'LineWidth', 1.5, "Color", "r");
+xlabel('x [mm]');
+ylabel('y [mm]');
+title('Traiettoria Encoders');
+legend('Formulas', 'Simulation');
+axis("equal");
+
+%% Plot the data of encoders and HTC together
+figure(5); hold on; grid on;
+plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.8, 'Color', 'r');
+plot(x_HTC, y_HTC, 'LineWidth', 1.8, 'Color', 'b');
+xlabel('x [mm]', 'FontSize', 12);
+ylabel('y [mm]', 'FontSize', 12);
+title('Encoders vs HTC', 'FontSize', 14, 'FontWeight', 'bold');
+legend({'Encoders', 'HTC'}, 'Location', 'best');
+axis("equal");
+
+%% Theta enc vs HTC
+
+figure(6);clf; hold on; grid on;
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_form, 'LineWidth', 1.8, 'Color', 'r');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_HTC, 'LineWidth', 1.8, 'Color', 'b');
+
+
+%% Calibration
+
+K_calib =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_HTC, y_HTC, theta_HTC)
+
+% pose_Enc = [x(t) y(t) theta(t)]
+pose_Enc_calib = EncodersMotion(K_calib, Ntic_L, Ntic_R, Enc_res);
+
+x_ENC_calib = pose_Enc_calib(1,:);
+y_ENC_calib = pose_Enc_calib(2,:);
+theta_ENC_calib = pose_Enc_calib(3,:);
+
+figure(7); hold on; grid on;
+plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
+plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
+xlabel('x [mm]');
+ylabel('y [mm]');
+title('Traiettoria Encoders');
+legend('Calib', 'HTC');
+axis("equal");
+
+figure(8); clf; hold on; grid on;
+plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
+plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "b");
+plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "g");
+xlabel('x [mm]');
+ylabel('y [mm]');
+title('Traiettoria Encoders');
+legend('Calib', 'Formula', 'HTC');
+axis("equal");
 
