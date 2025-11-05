@@ -195,7 +195,7 @@ axis("equal");
 
 figure(8); clf; hold on; grid on;
 plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
-plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "b");
+plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "b", "LineStyle","--");
 plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "g");
 xlabel('x [mm]');
 ylabel('y [mm]');
