@@ -15,11 +15,11 @@ addpath("funzioni");
 run("estraz_dati.m");
 
 % Baseline
-b = 0.9;
+b = 0.9; %m
 % Wheel radii
-R = [0.1 0.1];
+R = [0.1 0.1]; %m
 % Kinematic Parameters
-K_param = [b R];
+K_param = [b R]; %m
 DK_param = [0 0 0];
 
 % Robot heading
@@ -44,7 +44,7 @@ robot.setRobotPose(robotInitialPose);
 Pose0 = robot.GrabPose; % initial pose
 
 
-%% ENCODERS DATA EXTRACTION
+%% Encoders Data extraction
 MOTION_START = 125;
 
 Ntic_R = table2array(T_synced(MOTION_START:end,"Right_ENC [tic]"));
@@ -107,33 +107,31 @@ Pose = robot.GrabPose;
 
 %% HTC Data
 
-x_HTC = table2array(T_synced(MOTION_START:end-1, "X_HTC [mm]"));
-y_HTC = table2array(T_synced(MOTION_START:end-1, "Y_HTC [mm]"));
+x_HTC = table2array(T_synced(MOTION_START:end-1, "X_HTC [m]"));
+y_HTC = table2array(T_synced(MOTION_START:end-1, "Y_HTC [m]"));
 theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg
 theta_HTC = unwrap(theta_HTC); %to solve phase problems
 theta_HTC = deg2rad(theta_HTC); %rad
 
-figure(2); hold on; grid on;
+figure(2); clf; hold on; grid on;
 plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
-xlabel('x [mm]');
-ylabel('y [mm]');
-title('Traiettoria HTC');
-
+xlabel('x [m]');
+ylabel('y [m]');
+title('HTC Trajectory');
 legend('HTC');
 axis("equal");
 
 %% Encoders data from simulation
 
 %Extract them from the simulation 
-
 x_ENC_sim = robot.actualPath(:,1);
 y_ENC_sim = robot.actualPath(:,2);
 
-figure(3); hold on; grid on;
+figure(3); clf; hold on; grid on;
 plot(x_ENC_sim, y_ENC_sim, 'LineWidth', 1.5, "Color", "r");
-xlabel('x [mm]');
-ylabel('y [mm]');
-title('Traiettoria Encoders');
+xlabel('x [m]');
+ylabel('y [m]');
+title('Encoders Trajectory Sim');
 legend('Encoders');
 axis("equal");
 
@@ -143,25 +141,26 @@ axis("equal");
 % pose_Enc_formulas = [x(t) y(t) theta(t)]
 pose_Enc_formulas = EncodersMotion(K_param, Ntic_L, Ntic_R, Enc_res);
 
-x_ENC_form = pose_Enc_formulas(1,:);
-y_ENC_form = pose_Enc_formulas(2,:);
-theta_ENC_form = pose_Enc_formulas(3,:);
+% remove offset between HTC and encoders data
+x_ENC_form = pose_Enc_formulas(1,:) - x_HTC(1);
+y_ENC_form = pose_Enc_formulas(2,:) - y_HTC(1);
+theta_ENC_form = pose_Enc_formulas(3,:) - theta_HTC(1);
 
-figure(4); hold on; grid on;
+figure(4); clf; hold on; grid on;
 plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "g");
 plot(x_ENC_sim, y_ENC_sim, 'LineWidth', 1.5, "Color", "r");
-xlabel('x [mm]');
-ylabel('y [mm]');
-title('Traiettoria Encoders');
+xlabel('x [m]');
+ylabel('y [m]');
+title('Encoders Trajectory Formuls vs Sim');
 legend('Formulas', 'Simulation');
 axis("equal");
 
 %% Plot the data of encoders and HTC together
-figure(5); hold on; grid on;
+figure(5); clf; hold on; grid on;
 plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.8, 'Color', 'r');
 plot(x_HTC, y_HTC, 'LineWidth', 1.8, 'Color', 'b');
-xlabel('x [mm]', 'FontSize', 12);
-ylabel('y [mm]', 'FontSize', 12);
+xlabel('x [m]', 'FontSize', 12);
+ylabel('y [m]', 'FontSize', 12);
 title('Encoders vs HTC', 'FontSize', 14, 'FontWeight', 'bold');
 legend({'Encoders', 'HTC'}, 'Location', 'best');
 axis("equal");
@@ -171,15 +170,21 @@ axis("equal");
 figure(6);clf; hold on; grid on;
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_form, 'LineWidth', 1.8, 'Color', 'r');
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_HTC, 'LineWidth', 1.8, 'Color', 'b');
-
+xlabel('t [s]', 'FontSize', 12);
+ylabel('theta [rad]', 'FontSize', 12);
+title('Theta Encoders vs HTC', 'FontSize', 14, 'FontWeight', 'bold');
+legend({'Encoders', 'HTC'}, 'Location', 'best');
+axis("equal");
 
 %% Calibration
 
+% Calibration function call
 K_calib =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_HTC, y_HTC, theta_HTC)
 
 % pose_Enc = [x(t) y(t) theta(t)]
 pose_Enc_calib = EncodersMotion(K_calib, Ntic_L, Ntic_R, Enc_res);
 
+% Data extraction
 x_ENC_calib = pose_Enc_calib(1,:);
 y_ENC_calib = pose_Enc_calib(2,:);
 theta_ENC_calib = pose_Enc_calib(3,:);
@@ -187,19 +192,49 @@ theta_ENC_calib = pose_Enc_calib(3,:);
 figure(7); hold on; grid on;
 plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
 plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
-xlabel('x [mm]');
-ylabel('y [mm]');
-title('Traiettoria Encoders');
+xlabel('x [m]');
+ylabel('y [m]');
+title('Calibrated Data');
 legend('Calib', 'HTC');
 axis("equal");
 
 figure(8); clf; hold on; grid on;
 plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
-plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "b", "LineStyle","--");
-plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "g");
-xlabel('x [mm]');
-ylabel('y [mm]');
-title('Traiettoria Encoders');
+plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
+plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
+xlabel('x [m]');
+ylabel('y [m]');
+title('All data Comparison');
 legend('Calib', 'Formula', 'HTC');
 axis("equal");
 
+%% Pose Enc vs HTC after calibration by single values
+
+figure(9);clf; hold on; grid on;
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_calib, 'LineWidth', 1.8, 'Color', 'r');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_HTC, 'LineWidth', 1.8, 'Color', 'b');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
+xlabel('t [s]', 'FontSize', 12);
+ylabel('theta [rad]', 'FontSize', 12);
+title('Theta Encoders vs HTC after Calibration', 'FontSize', 14, 'FontWeight', 'bold');
+legend({'Encoders Calib', 'HTC', 'Encoders NO Calib'}, 'Location', 'best');
+
+
+figure(10);clf; hold on; grid on;
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_calib, 'LineWidth', 1.8, 'Color', 'r');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_HTC, 'LineWidth', 1.8, 'Color', 'b');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
+xlabel('t [s]', 'FontSize', 12);
+ylabel('x [m]', 'FontSize', 12);
+title('X Encoders vs HTC after Calibration', 'FontSize', 14, 'FontWeight', 'bold');
+legend({'Encoders Calib', 'HTC', 'Encoders NO Calib'}, 'Location', 'best');
+
+
+figure(11);clf; hold on; grid on;
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_calib, 'LineWidth', 1.8, 'Color', 'r');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_HTC, 'LineWidth', 1.8, 'Color', 'b');
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
+xlabel('t [s]', 'FontSize', 12);
+ylabel('y [m]', 'FontSize', 12);
+title('Y vs HTC after Calibration', 'FontSize', 14, 'FontWeight', 'bold');
+legend({'Encoders Calib', 'HTC', 'Encoders NO Calib'}, 'Location', 'best');
