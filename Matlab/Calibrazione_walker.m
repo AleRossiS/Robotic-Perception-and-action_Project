@@ -109,7 +109,13 @@ Pose = robot.GrabPose;
 
 x_HTC = table2array(T_synced(MOTION_START:end-1, "X_HTC [m]"));
 y_HTC = table2array(T_synced(MOTION_START:end-1, "Y_HTC [m]"));
-theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg
+
+
+%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%
+theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg NB Z, PERCHè?
+%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%
+
+
 theta_HTC = unwrap(theta_HTC); %to solve phase problems
 theta_HTC = deg2rad(theta_HTC); %rad
 
@@ -189,7 +195,7 @@ x_ENC_calib = pose_Enc_calib(1,:);
 y_ENC_calib = pose_Enc_calib(2,:);
 theta_ENC_calib = pose_Enc_calib(3,:);
 
-figure(7); hold on; grid on;
+figure(7); clf; hold on; grid on;
 plot(x_ENC_calib, y_ENC_calib, 'LineWidth', 1.5, "Color", "r");
 plot(x_HTC, y_HTC, 'LineWidth', 1.5, "Color", "b");
 xlabel('x [m]');

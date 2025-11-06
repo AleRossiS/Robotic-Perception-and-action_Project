@@ -30,7 +30,10 @@ options = optimoptions(@lsqnonlin, ...
     'Display', 'iter', ...                  % mostra l'andamento
     'StepTolerance', 1e-6, ...              % soglia ragionevole per variazione parametri
     'OptimalityTolerance', 1e-6, ...        % soglia per criterio di ottimalità
-    'FunctionTolerance', 1e-6);             % soglia per variazione del valore funzione
+    'FunctionTolerance', 1e-6, ...          % soglia per variazione del valore funzione
+    'MaxIterations', 5000, ...              % numero massimo di iterazioni
+    'MaxFunctionEvaluations', 10000);        % numero massimo di valutazioni della funzio
+
     param_calib = lsqnonlin(@(K) Calib_lsq(K, Ntic_L, Ntic_R, Enc_res, x_HTC, y_HTC, theta_HTC), K0, [], [], options);
 
 end
