@@ -40,15 +40,21 @@ end
 
 
 function mse_val = Calib_lsq(K, Ntic_L, Ntic_R, Enc_res, x_HTC, y_HTC, theta_HTC)
-% The cost function is defined as the mean squared error (MSE)
+% The cost function is defined as the mean squared error (MSE).
+% The orientation term (theta) is given a smaller weight in the MSE,
+% since its value (in radians) would otherwise dominate the position
+% errors (x and y) due to its different scale.
+
 
 pose_Enc = EncodersMotion(K, Ntic_L, Ntic_R, Enc_res);
 
     x_ENC = pose_Enc(1,:)';
     y_ENC = pose_Enc(2,:)';
     theta_ENC = pose_Enc(3,:)';
+
+    weight_theta = 0.1;
     
-    cost = [x_ENC; y_ENC; theta_ENC] - [x_HTC; y_HTC; theta_HTC];
+    cost = [x_ENC; y_ENC; weight_theta*theta_ENC] - [x_HTC; y_HTC; weight_theta*theta_HTC];
     mse_val = mean(cost(:).^2);
         
 end 
