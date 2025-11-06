@@ -50,7 +50,7 @@ MOTION_START = 125;
 Ntic_R = table2array(T_synced(MOTION_START:end,"Right_ENC [tic]"));
 Ntic_L = table2array(T_synced(MOTION_START:end,"Left_ENC [tic]"));
 
-%Tic steps
+%Tic incremento at each step steps
 Ntic_R = diff(Ntic_R);
 Ntic_L = diff(Ntic_L);
 
@@ -109,13 +109,7 @@ Pose = robot.GrabPose;
 
 x_HTC = table2array(T_synced(MOTION_START:end-1, "X_HTC [m]"));
 y_HTC = table2array(T_synced(MOTION_START:end-1, "Y_HTC [m]"));
-
-
-%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%
-theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg NB Z, PERCHè?
-%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%
-
-
+theta_HTC = table2array(T_synced(MOTION_START:end-1, "DegZ_HTC [deg]")); %deg around Z
 theta_HTC = unwrap(theta_HTC); %to solve phase problems
 theta_HTC = deg2rad(theta_HTC); %rad
 
