@@ -209,8 +209,8 @@ T_synced = table(master_time_seconds, ...
 % Ora aggiungiamo i dati sincronizzati (Input del modello)
 
 T_synced.X_RS=X_RS;
-T_synced.Y_RS=X_RS;
-T_synced.Z_RS=X_RS;
+T_synced.Y_RS=Y_RS;
+T_synced.Z_RS=Z_RS;
 T_synced.DegX_RS=DegX_RS;
 T_synced.DegY_RS=DegX_RS;
 T_synced.DegZ_RS=DegX_RS;
