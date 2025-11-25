@@ -1,3 +1,0 @@
-repository='https://github.com/pbosetti/mads_plugin.git'
-module=''
-tag='origin'

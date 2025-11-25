@@ -6,7 +6,7 @@ The guide summerise how to use the replay plugin, rerunn plugin and any other pl
 After you installed MADS by following the completely clear guide available, you can start by installing the already existing plugins: replay_plugin and rerunner_plugin.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-DIRECTORIES WITH PLUGINS
+DIRECTORIES WITH PLUGINS NO NEED FOR THIS PART WE ALREADY HAVE THE PLUGINS IN GIT
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 Create a base directory in which to work. Mine is in /home/{&USER}/Documents/RoboticPerception
@@ -27,12 +27,16 @@ The above are the URL of the replay and rerunn plugin. They are going to make a 
 To install it you must navigate inside the folder, for example with rerunner:
 (already inside RoboticPerception folder) cd rerunner_plugin
 
-execute:
-cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$(mads -p)"
-cmake --build build -j4
-sudo cmake --install build
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+make effective your modifications, inside "build" folder of the plugin:
+make
 
-
+If it does not work, you need to remove and rebuild everything:
+inside the plugin folder (es: /replay_plugin)
+rm -rf build
+mkdir build && cd build
+cmake .. && make
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 MADS.INI FILE MODIFICATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
@@ -49,25 +53,11 @@ Then i do:
 
 sudo gedit /usr/local/etc/mads.ini
 
-This will open a text editor to modify the file. The rerunner plugin agent is sctructured as follows:
+YOU MUST UPDATE YOUR LOCAL FILE, COPY THE MADS.INI AND PASTE IT IN YOUR DIRECTORY
+To make MADS use your local mads.ini file:
+sudo rm /usr/local/etc/mads.ini
+sudo ln -sf $(pwd)/mads.ini /usr/local/etc/mads.ini
 
-[rerunner]
-sub_topic = ["replay"] # Topics to subscribe to (array of strings)
-time = "timecode"       # Name of the timecode column in the input data (string)
-# List of keypaths for time series
-keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
-# List of keypaths to build ACF for
-acf_keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
-fft_keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
-window_size  = 200          # Width of the ACF and FFT window (integer)
-blueprint = "blueprint.rbl" # local or absolute path to a valid blueprint
-parallelize = true # Runs FFT and ACF computations in parallel
-
-Another example is with the replay plugin:
-
-[replay_encoders]
-csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.encoders.csv"
-loop = false # once the end of file has been reached, start again from beginning
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 INSTALLING RERUN.IO
@@ -75,7 +65,7 @@ INSTALLING RERUN.IO
 
 I managed to install it by simply doing:
 
-pip3 install rerun-sdk
+pip3 install rerun-sdk==0.25.1
 
 After installation try running: 
 
@@ -94,32 +84,21 @@ After this step, you are ready to run the simulation:
 
 mads broker
 
-- In a second terminal we can run the replay plugin module we desire from the ini file:
+- In a second terminal we play the visualizer:
+
+python3 visualizer.py
 
 mads source replay.plugin -n "replay_encoders" -p 1000
 
 This particular one runs the [replay_encoders] agent
 
-- If you want to see what is being replayed, in another terminal run:
+- In a third terminal run the filter:
 
-mads feedback
+mads filter odometry_filter.plugin -n "odometry_filter"
 
-- To visualize data on rerun.io, in a new terminal start the viewer:
+- Finally, the source:
 
-rerun
-
-- To make the rerunner_plugin work, in a new terminal navigate inside the rerunner_plugin folder:
-
-cd home/{$USER}/Documents/RoboticPerception/rerunner_plugin/
-
-then run:
-
-mads sink build/rerunner.plugin
-
-I should try and find a way to source the plugin so that it can be run in a similar way as we do with the replay plugins
-
-This final command should open the rerun.io viewer and you start to see the data that your agent is extracting. In this example you are going to see the temperature and humidity data, which is stable
-
+mads source replay.plugin -n "encoders_source"
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

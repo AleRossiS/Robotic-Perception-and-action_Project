@@ -46,67 +46,66 @@ public:
                          std::vector<unsigned char> *blob = nullptr) override {
                         
     out = json::object();
+    try {    
 
-    
-
-    if (!_replay->has_next()) {
-        if(_params.value("loop", false)){
-          _replay->reset();
-          _first_packet  = true;
-        }else{
-          return return_type::critical;
-        }
-    }
-
-    try {
-      json raw_data = _replay->advance();
-      
-      // if out is null, empty or not object, skip
-      if(raw_data.is_null() || raw_data.empty() || !raw_data.is_object()) return return_type::success;
-
-      out = raw_data;
-
-      double current_sim_time = 0.0;
-      bool time_found = false;
-
-      json flat = out.flatten();
-
-      //Search for "/message/timecode"
-
-      if (flat.contains("/message/timecode") && flat["/message/timecode"].is_number()){
-          current_sim_time = flat["/message/timecode"].get<double>();
-          time_found = true;
-      }
-      // search for "timecode"
-      else if (flat.contains("/timecode") && flat["/timecode"].is_number()) {
-          current_sim_time = flat["/timecode"].get<double>();
-          time_found = true;
-      }
-
-      // time synchronization
-
-      if(time_found){
-        if (_first_packet){
-          _initial_sim_time = current_sim_time;
-          _start_real_time = std::chrono::steady_clock::now();
-          _first_packet = false;
-        } else {
-          double dt_sim = current_sim_time - _initial_sim_time;
-          auto dt_duration = std::chrono::microseconds(static_cast<long long>(dt_sim * 1e6));
-          auto target_time = _start_real_time + dt_duration;
-          
-          // Sleep until target time
-          std::this_thread::sleep_until(target_time);
+      if (!_replay->has_next()) {
+          if(_params.value("loop", false)){
+            _replay->reset();
+            _first_packet  = true;
+          }else{
+            return return_type::critical;
           }
+      }
+
+      
+        json raw_data = _replay->advance();
+        
+        // if out is null, empty or not object, skip
+        if(raw_data.is_null() || raw_data.empty() || !raw_data.is_object()) return return_type::success;
+
+        out = raw_data;
+
+        double current_sim_time = 0.0;
+        bool time_found = false;
+
+        json flat = out.flatten();
+
+        //Search for "/message/timecode"
+
+        if (flat.contains("/message/timecode") && flat["/message/timecode"].is_number()){
+            current_sim_time = flat["/message/timecode"].get<double>();
+            time_found = true;
+        }
+        // search for "timecode"
+        else if (flat.contains("/timecode") && flat["/timecode"].is_number()) {
+            current_sim_time = flat["/timecode"].get<double>();
+            time_found = true;
         }
 
-        if(!_agent_id.empty()) out["agent_id"] = _agent_id;
+        // time synchronization
 
-        if(out.contains("timestamp")){
-          _error = "timestamp field name is not allowed, it will be removed";
-          out.erase("timestamp");
-          return return_type::warning;
-        }
+        if(time_found){
+          if (_first_packet){
+            _initial_sim_time = current_sim_time;
+            _start_real_time = std::chrono::steady_clock::now();
+            _first_packet = false;
+          } else {
+            double dt_sim = current_sim_time - _initial_sim_time;
+            auto dt_duration = std::chrono::microseconds(static_cast<long long>(dt_sim * 1e6));
+            auto target_time = _start_real_time + dt_duration;
+            
+            // Sleep until target time
+            std::this_thread::sleep_until(target_time);
+            }
+          }
+
+          if(!_agent_id.empty()) out["agent_id"] = _agent_id;
+
+          if(out.contains("timestamp")){
+            _error = "timestamp field name is not allowed, it will be removed";
+            out.erase("timestamp");
+            return return_type::warning;
+          }
 
     } catch (const std::exception &e) {
       // if something happens log error

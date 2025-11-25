@@ -1,0 +1,28 @@
+# --- Ignora le cartelle di build ---
+build/
+buildd/
+_deps/
+CMakeFiles/
+
+# --- Ignora file generati da CMake e Make ---
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# --- Ignora Binari e Librerie ---
+*.plugin
+*.so
+*.dylib
+*.exe
+*.o
+*.a
+
+# --- Ignora file di sistema/editor ---
+.DS_Store
+.vscode/
+*.swp
+*~
+
+# --- Ignora dati temporanei runtime ---
+*.log

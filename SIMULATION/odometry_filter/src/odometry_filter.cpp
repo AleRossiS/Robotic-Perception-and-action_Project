@@ -76,7 +76,6 @@ public:
   map<string, string> info() override {
         return {
             {"type", "RK2 Odometry Filter"},
-            {"description", "Computes pose from encoders"}
         };
   }
 
