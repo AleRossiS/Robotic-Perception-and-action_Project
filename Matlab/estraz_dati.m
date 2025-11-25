@@ -199,8 +199,8 @@ T_synced.X_RS=X_RS;
 T_synced.Y_RS=Y_RS;
 T_synced.Z_RS=Z_RS;
 T_synced.DegX_RS=DegX_RS;
-T_synced.DegY_RS=DegX_RS;
-T_synced.DegZ_RS=DegX_RS;
+T_synced.DegY_RS=DegY_RS;
+T_synced.DegZ_RS=DegZ_RS;
 
 
 % Velocità Angolari (Omega) IMU
@@ -239,7 +239,7 @@ T_synced.Properties.VariableNames = {'Tempo [s]', ...
     ... % Dati HTC 
     'X_HTC [m]', 'Y_HTC [m]', 'Z_HTC [m]', ...
     'DegX_HTC [deg]', 'DegY_HTC [deg]', 'DegZ_HTC [deg]', ...
-    ... % Dati RS (Reference System)
+    ... % Dati RS 
     'X_RS [m]', 'Y_RS [m]', 'Z_RS [m]', ...
     'DegX_RS [deg]', 'DegY_RS [deg]', 'DegZ_RS [deg]', ...
     ... % Dati IMU - Velocità Angolari (Omega - Giroscopi)
@@ -258,3 +258,6 @@ T_synced.Properties.VariableNames = {'Tempo [s]', ...
 disp('Tabella sincronizzata creata con successo:');
 head(T_synced, 5) 
 
+
+
+clearvars -except T_synced;

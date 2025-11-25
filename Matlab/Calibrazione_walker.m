@@ -17,7 +17,7 @@ run("estraz_dati.m");
 % Baseline
 b = 0.9; %m
 % Wheel radii
-R = [0.1 0.1]; %m
+R = [0.1 0.1]; %m  Rr RL
 % Kinematic Parameters
 K_param = [b R]; %m
 DK_param = [0 0 0];
