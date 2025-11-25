@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/CMakeFiles/pugg-populate"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/CMakeFiles/pugg-populate.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/CMakeFiles/pugg-populate-complete.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-build.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-configure.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-download.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-install.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-mkdir.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-patch.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-test.rule"
+		},
+		{
+			"file" : "/home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/_deps/pugg-subbuild/pugg-populate-prefix/src/pugg-populate-stamp/pugg-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"pugg-populate"
+		],
+		"name" : "pugg-populate"
+	}
+}

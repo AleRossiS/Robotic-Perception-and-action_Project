@@ -1,0 +1,21 @@
+[replay_imu]
+csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.imu>
+loop = false # once the end of file has been reached, start again from beginning
+
+[replay_htc]
+csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.abs>
+loop = false # once the end of file has been reached, start again from beginning
+
+[replay_encoders]
+csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.enc>
+loop = false # once the end of file has been reached, start again from beginning
+
+[replay_realsense]
+csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.abs>
+loop = false # once the end of file has been reached, start again from beginning
+
+[first_plugin]
+pub_topic = "publish_filter"
+sub_topic = "replay_plugin"
+first_setting = 5
+

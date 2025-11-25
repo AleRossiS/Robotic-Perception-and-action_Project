@@ -1,0 +1,183 @@
+This file contains information on how to run MADS. (Spoiler so many terminals)
+
+The guide summerise how to use the replay plugin, rerunn plugin and any other plugin your are creating.
+
+
+After you installed MADS by following the completely clear guide available, you can start by installing the already existing plugins: replay_plugin and rerunner_plugin.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+DIRECTORIES WITH PLUGINS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Create a base directory in which to work. Mine is in /home/{&USER}/Documents/RoboticPerception
+
+Once you navigate inside it: 
+cd /home/{&USER}/Documents/RoboticPerception
+
+Clone the repository:
+
+git clone (INSERT URL HERE)
+
+https://github.com/MADS-NET/replay_plugin
+
+https://github.com/MADS-NET/rerunner_plugin?tab=readme-ov-file
+
+The above are the URL of the replay and rerunn plugin. They are going to make a directory corresponding to their name. 
+
+To install it you must navigate inside the folder, for example with rerunner:
+(already inside RoboticPerception folder) cd rerunner_plugin
+
+execute:
+cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$(mads -p)"
+cmake --build build -j4
+sudo cmake --install build
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+MADS.INI FILE MODIFICATION
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+
+Then, you must update your mads.ini file. To locate wherethefuckitis try simply writing in terminal:
+
+mads ini -i
+
+This will give you an error like:
+
+Cannot write or overwrite "/usr/local/etc/mads.ini"
+
+Then i do:
+
+sudo gedit /usr/local/etc/mads.ini
+
+This will open a text editor to modify the file. The rerunner plugin agent is sctructured as follows:
+
+[rerunner]
+sub_topic = ["replay"] # Topics to subscribe to (array of strings)
+time = "timecode"       # Name of the timecode column in the input data (string)
+# List of keypaths for time series
+keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
+# List of keypaths to build ACF for
+acf_keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
+fft_keypaths = ["/replay/sensor/temperature", "/replay/sensor/humidity"]
+window_size  = 200          # Width of the ACF and FFT window (integer)
+blueprint = "blueprint.rbl" # local or absolute path to a valid blueprint
+parallelize = true # Runs FFT and ACF computations in parallel
+
+Another example is with the replay plugin:
+
+[replay_encoders]
+csv_file = "/home/lorenzo/Documents/RoboticPerception/data/mads_calibration.encoders.csv"
+loop = false # once the end of file has been reached, start again from beginning
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+INSTALLING RERUN.IO
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+I managed to install it by simply doing:
+
+pip3 install rerun-sdk
+
+After installation try running: 
+
+rerun
+
+To check if the viewer starts
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+RUNNING THE SIMULATION
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+After this step, you are ready to run the simulation:
+
+- In a first terminal run:
+
+mads broker
+
+- In a second terminal we can run the replay plugin module we desire from the ini file:
+
+mads source replay.plugin -n "replay_encoders" -p 1000
+
+This particular one runs the [replay_encoders] agent
+
+- If you want to see what is being replayed, in another terminal run:
+
+mads feedback
+
+- To visualize data on rerun.io, in a new terminal start the viewer:
+
+rerun
+
+- To make the rerunner_plugin work, in a new terminal navigate inside the rerunner_plugin folder:
+
+cd home/{$USER}/Documents/RoboticPerception/rerunner_plugin/
+
+then run:
+
+mads sink build/rerunner.plugin
+
+I should try and find a way to source the plugin so that it can be run in a similar way as we do with the replay plugins
+
+This final command should open the rerun.io viewer and you start to see the data that your agent is extracting. In this example you are going to see the temperature and humidity data, which is stable
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+Comandi di Debug utili:
+
+Se mads broker non funziona e ritorna qualcosa come:
+
+lorenzo@lorenzo-XPS-13-7390:~/Documents/RoboticPerception$ mads broker
+Reading settings from mads.ini [broker]
+ioctl error: No such device
+Cannot get IP address for NIC lo0
+Binding broker frontend (XSUB) at tcp://*:9090
+ZMQ error, could not connect: Address already in use
+
+Vuol dire che si è formato un ingorgo di processi. Verificare cos'è in esecuzione tramite:
+
+lsof -i :9090
+
+Questo mostrerà una lista con valori PID. Eliminarli tutti:
+
+tramite:
+pkill -f mads-brok (nome del processo)
+o manualmente:
+kill -9 <PID>
+
+CREARE UN LINK PER IL PLUGIN:
+esempio
+sudo ln -sf /home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/odometry_filter.plugin /usr/local/lib/odometry_filter.plugin
+
+check:
+ls -l /usr/local/lib/odometry_filter.plugin
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
