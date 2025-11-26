@@ -155,24 +155,24 @@ title('Encoders Trajectory Formuls vs Sim');
 legend('Formulas', 'Simulation');
 axis("equal");
 
-%% Aruco Data Extraction and Cleaning
+%% Real Sense Data Extraction and Cleaning
 % --- Da implementare in base alle colonne reali ---
-x_ARUCO = table2array(T_synced(MOTION_START:end-1, "X_RS [m]"));
-y_ARUCO = table2array(T_synced(MOTION_START:end-1, "Y_RS [m]"));
-theta_ARUCO = table2array(T_synced(MOTION_START:end-1, "DegZ_RS [deg]"));
-theta_ARUCO = unwrap(theta_ARUCO); 
-theta_ARUCO = deg2rad(theta_ARUCO);
+x_RS = table2array(T_synced(MOTION_START:end-1, "X_RS [m]"));
+y_RS = table2array(T_synced(MOTION_START:end-1, "Y_RS [m]"));
+theta_RS = table2array(T_synced(MOTION_START:end-1, "DegZ_RS [deg]"));
+theta_RS = unwrap(theta_RS); 
+theta_RS = deg2rad(theta_RS);
 
-% Gestione degli Zeri/NaNs di Aruco:
-% Assumiamo che i valori zero o molto vicini allo zero in Aruco indichino
+% Gestione degli Zeri/NaNs di RS:
+% Assumiamo che i valori zero o molto vicini allo zero in RS indichino
 % una lettura non riuscita o non valida.
 % Sostituiamo questi valori non validi con i dati HTC, in modo che la fusione 
-% non sia influenzata negativamente quando Aruco fallisce.
+% non sia influenzata negativamente quando RS fallisce.
 % La soglia 1e-4 è arbitraria, adattala se necessario.
-idx_invalid_aruco = (abs(x_ARUCO) < 1e0 & abs(y_ARUCO) < 1e0);
-x_ARUCO(idx_invalid_aruco) = x_HTC(idx_invalid_aruco);
-y_ARUCO(idx_invalid_aruco) = y_HTC(idx_invalid_aruco);
-theta_ARUCO(idx_invalid_aruco) = theta_HTC(idx_invalid_aruco);
+idx_invalid_RS = (abs(x_RS) < 1e0 & abs(y_RS) < 1e0);
+x_RS(idx_invalid_RS) = x_HTC(idx_invalid_RS);
+y_RS(idx_invalid_RS) = y_HTC(idx_invalid_RS);
+theta_RS(idx_invalid_RS) = theta_HTC(idx_invalid_RS);
 
  %% NUOVO RIFERIMENTO FUSO (HTC+RS):
 
@@ -181,11 +181,11 @@ x_REF2 = x_HTC;
 y_REF2 = y_HTC;
 theta_REF2 = theta_HTC;
 
-% HTC and Aruco Data Fusion (Dynamic Weighting)
+% HTC and RS Data Fusion (Dynamic Weighting)
 % 1. Definizione dei pesi base e della soglia di affidabilità
 w_HTC_base = 0.85; % Peso base di HTC (molto alto)
-w_ARUCO_max = 0.45; % Peso massimo di Aruco
-threshold_dist = 0.1; % [m] - Soglia: se Aruco dista più di 10 cm da HTC, è un outlier. (ADATTARE!)
+w_RS_max = 0.45; % Peso massimo di RS
+threshold_dist = 0.1; % [m] - Soglia: se RS dista più di 10 cm da HTC, è un outlier. (ADATTARE!)
 
 % 2. Inizializzazione del riferimento fuso
 x_REF1 = x_HTC;
@@ -195,27 +195,21 @@ theta_REF1 = theta_HTC;
 % 3. Loop per la fusione dinamica punto per punto
 for i = 1:length(x_HTC)
     
-    % Distanza tra la misura Aruco e la misura HTC
-    dist_aruco_htc = sqrt((x_ARUCO(i) - x_HTC(i))^2 + (y_ARUCO(i) - y_HTC(i))^2);
+    % Distanza tra la misura RS e la misura HTC
+    dist_RS_htc = sqrt((x_RS(i) - x_HTC(i))^2 + (y_RS(i) - y_HTC(i))^2);
     
-    if dist_aruco_htc < threshold_dist
-        % Se Aruco è vicino a HTC, lo usiamo (peso dinamico)
+    if dist_RS_htc < threshold_dist
+        % Se RS è vicino a HTC, lo usiamo (peso dinamico)
         % Normalizziamo il peso in base alla vicinanza (più vicino = più peso)
         % Un peso semplice, ma dinamico:
-        w_aruco_current = w_ARUCO_max * (1 - dist_aruco_htc / threshold_dist);
-        w_htc_current = 1 - w_aruco_current;
+        w_RS_current = w_RS_max * (1 - dist_RS_htc / threshold_dist);
+        w_htc_current = 1 - w_RS_current;
         
         % Fusione
-        x_REF1(i) = w_htc_current * x_HTC(i) + w_aruco_current * x_ARUCO(i);
-        y_REF1(i) = w_htc_current * y_HTC(i) + w_aruco_current * y_ARUCO(i);
-        theta_REF1(i) = w_htc_current * theta_HTC(i) + w_aruco_current * theta_ARUCO(i);
-        
-    else
-        % Se Aruco è troppo lontano (outlier), ignoriamo la sua lettura.
-        % Usiamo solo HTC. (x_REF, y_REF, theta_REF mantengono i valori HTC iniziali)
-        
-        % Se Aruco è stato sostituito da HTC nella pulizia iniziale (punto A della risposta precedente),
-        % questo blocco non è strettamente necessario, ma è utile per una logica pulita.
+        x_REF1(i) = w_htc_current * x_HTC(i) + w_RS_current * x_RS(i);
+        y_REF1(i) = w_htc_current * y_HTC(i) + w_RS_current * y_RS(i);
+        theta_REF1(i) = w_htc_current * theta_HTC(i) + w_RS_current * theta_RS(i);
+     
     end
 end
 
@@ -276,7 +270,7 @@ axis("equal");
 
 figure(8); clf; hold on; grid on;
 plot(x_ENC_calib1, y_ENC_calib1, 'LineWidth', 1.5, "Color", "r");
-plot(x_ENC_calib2, y_ENC_calib2, 'LineWidth', 1.5, "Color", "w", "LineStyle",":");
+plot(x_ENC_calib2, y_ENC_calib2, 'LineWidth', 1.5, "Color", "c", "LineStyle",":");
 plot(x_ENC_form, y_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
 plot(x_REF1, y_REF1, 'LineWidth', 1.5, "Color", "b");
 plot(x_REF2, y_REF2, 'LineWidth', 1.5, "Color", "y", "LineStyle",":");
@@ -290,7 +284,7 @@ axis("equal");
 
 figure(9);clf; hold on; grid on;
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_calib1, 'LineWidth', 1.8, 'Color', 'r');
-plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_calib2, 'LineWidth', 1.8, 'Color', 'w', "LineStyle",":");
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_calib2, 'LineWidth', 1.8, 'Color', 'c', "LineStyle",":");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_REF1, 'LineWidth', 1.8, 'Color', 'b');
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), theta_REF2, 'LineWidth', 1.8, 'Color', 'y', "LineStyle",":");
@@ -302,7 +296,7 @@ legend({'Encoders Calib1','Encoders Calib2', 'HTC+RS', 'Encoders NO Calib','HTC'
 
 figure(10);clf; hold on; grid on;
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_calib1, 'LineWidth', 1.8, 'Color', 'r');
-plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_calib2, 'LineWidth', 1.8, 'Color', 'w', "LineStyle",":");
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_calib2, 'LineWidth', 1.8, 'Color', 'c', "LineStyle",":");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_REF1, 'LineWidth', 1.8, 'Color', 'b');
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), x_REF2, 'LineWidth', 1.8, 'Color', 'y', "LineStyle",":");
@@ -314,7 +308,7 @@ legend({'Encoders Calib1','Encoders Calib2', 'HTC+RS', 'Encoders NO Calib','HTC'
 
 figure(11);clf; hold on; grid on;
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_calib1, 'LineWidth', 1.8, 'Color', 'r');
-plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_calib2, 'LineWidth', 1.8, 'Color', 'w', "LineStyle",":");
+plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_calib2, 'LineWidth', 1.8, 'Color', 'c', "LineStyle",":");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_REF1, 'LineWidth', 1.8, 'Color', 'b');
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_ENC_form, 'LineWidth', 1.5, "Color", "g", "LineStyle","--");
 plot(table2array(T_synced(MOTION_START:end-1, "Tempo [s]")), y_REF2, 'LineWidth', 1.8, 'Color', 'y', "LineStyle",":");
@@ -323,42 +317,6 @@ ylabel('y [m]', 'FontSize', 12);
 title('Y vs REF after Calibration', 'FontSize', 14, 'FontWeight', 'bold');
 legend({'Encoders Calib1','Encoders Calib2', 'HTC+RS', 'Encoders NO Calib','HTC'}, 'Location', 'best');
 
-% Error
-function [max_error_pos, rms_error_pos] = CalculateError(x_calib, y_calib, theta_calib, x_ref, y_ref, theta_ref)
-% Calcola l'errore di posizione e orientamento tra due traiettorie.
-% Assumiamo che le traiettorie siano sincronizzate e abbiano la stessa lunghezza.
-
-for i=1:length(x_calib)
-    % Errore di Posizione (Euclideo)
-    error_x(i) = x_calib(i) - x_ref(i);
-    error_y(i) = y_calib(i) - y_ref(i);
-    error_pos(i) = sqrt(error_x(i).^2 + error_y(i).^2);
-
-    % Errore di Orientamento (Angolare)
-    % Usiamo atan2 per gestire la periodicità di theta e calcoliamo la differenza angolare minima
-    error_theta(i) = atan2(sin(theta_calib(i) - theta_ref(i)), cos(theta_calib(i) - theta_ref(i)));
-
-    % Metriche di Errore di Posizione
-    max_error_pos = max(error_pos);
-    rms_error_pos = sqrt(mean(error_pos.^2)); % Errore Quadratico Medio (Root Mean Square)
-end
-%     
-% 
-    % Plot dell'Errore nel tempo
-    % figure; hold on; grid on;
-    % t = 1:length(error_pos);
-    % subplot(2,1,1);
-    % plot(t, error_pos, 'LineWidth', 1.5, 'Color', 'k');
-    % title('Errore di Posizione nel Tempo (Euclideo)');
-    % xlabel('Passo di Tempo');
-    % ylabel('Errore di Posizione [m]');
-    % 
-    % subplot(2,1,2);
-    % plot(t, rad2deg(error_theta), 'LineWidth', 1.5, 'Color', 'r');
-    % title('Errore di Orientamento nel Tempo');
-    % xlabel('Passo di Tempo');
-    % ylabel('Errore di Orientamento [deg]');
-end
 
 % Calcolo e Visualizzazione dell'Errore
 % Usa la traiettoria calibrata rispetto al riferimento REF

@@ -11,7 +11,6 @@ function Q = print_syst()
     y_new = y + pi * ((NTic_R*Rr+NTic_L*Rl) / Enc_res) * sin(theta + theta_incr/2)
     theta_new = theta + theta_incr
     
-    enc_motion = [x ; y ; theta];
     
     Functions = [x_new; y_new; theta_new];
     no = 4096; % encoders resolution
