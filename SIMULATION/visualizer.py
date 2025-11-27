@@ -2,10 +2,11 @@ import zmq
 import json
 import rerun as rr
 import sys
+from rerun.archetypes import Scalars 
 
 # Configurazione
 MADS_ENDPOINT = "tcp://localhost:9091"  #Broker port
-TOPIC_FILTER = ["odometry_filter", "pose_htc_source", "imu_source"]        #listening topic
+TOPIC_FILTER = ["odometry_filter", "pose_htc_source", "pose_rs_source", "imu_source"]        #listening topic
 
 def get_nested(data, path):
     # 1. Prova accesso diretto (caso flattened)
@@ -26,7 +27,7 @@ def get_nested(data, path):
                 curr = curr[k]
             else:
                 return None
-        return curr
+        return float(curr)
     except:
         return None
 
@@ -49,6 +50,7 @@ def main():
 
     traj_odometry = []
     traj_ground_truth = []
+    traj_rs = []
 
     while True:
         try:
@@ -69,7 +71,7 @@ def main():
 
             
             # Odometry Filter Trajectory - RED
-            if topic == "odometry_filter" and "pose_vector" in data:
+            if topic == "odometry_filter":
                 pos = data["pose_vector"] # [x, y, z]
                 traj_odometry.append(pos)
                 if len(traj_odometry) > 6000: traj_odometry.pop(0)
@@ -88,21 +90,41 @@ def main():
                 if x is not None and y is not None:
                     pos = [float(x), float(y), float(z) if z else 0.0]
                     traj_ground_truth.append(pos)
-                    if len(traj_ground_truth)>5000: traj_ground_truth.pop(0)
+                    if len(traj_ground_truth)>6000: traj_ground_truth.pop(0)
                     rr.log("robot/gt_body", rr.Points3D([pos], radii=0.03, colors=[0, 255, 0], labels="GT"))
                     rr.log("robot/gt_path", rr.LineStrips3D([traj_ground_truth], colors=[[0, 255, 0]], radii=0.005))
+            
+            # RealSense Trajectory - CYAN
+            elif topic == "pose_rs_source":
+                x = get_nested(data, "/message/pose/position/0")
+                y = get_nested(data, "/message/pose/position/1")
+
+                yaw = get_nested(data, "/message/pose/attitude_along_z")
+                
+                if x is not None and y is not None:
+                    pos = [float(x), float(y), 0.0]
+                    traj_rs.append(pos)
+                    if len(traj_rs)>6000: traj_rs.pop(0)
+                    rr.log("robot/rs_body", rr.Points3D([pos], radii=0.03, colors=[0, 255, 255], labels="RS"))
+                    rr.log("robot/rs_path", rr.LineStrips3D([traj_rs], colors=[[0, 255, 255]], radii=0.005))
                     
                 
 
             # IMU Data Visualization - GRAPHS
             elif topic == "imu_source":
-                # Acc X
-                acc_x = get_nested(data, "/message/imu/left/accelerations/x")
-                if acc_x is not None: rr.log("sensors/imu/acc_x", rr.Scalar(float(acc_x)))
+                # Imu left
+                acc_l_x = get_nested(data, "/message/imu/left/accelerations/x")
+                acc_l_y = get_nested(data, "/message/imu/left/accelerations/y")
+                if acc_l_x is not None: rr.log("sensors/imu/left/acc/x", Scalars(acc_l_x))
+                if acc_l_y is not None: rr.log("sensors/imu/left/acc/y", Scalars(acc_l_y))
 
-                # Gyro Z
+                # Imu middle
                 gyro_z = get_nested(data, "/message/imu/middle/gyroscopes/z")
-                if gyro_z is not None: rr.log("sensors/imu/gyro_z", rr.Scalar(float(gyro_z)))
+                if gyro_z is not None: rr.log("sensors/imu/middle/gyro/z", Scalars(gyro_z))
+
+                # Imu right
+                acc_r_x = get_nested(data, "/message/imu/right/accelerations/x")
+                if acc_r_x is not None: rr.log("sensors/imu/right/acc/x", Scalars(acc_r_x))
         except KeyboardInterrupt:
             print("Manual interruption.")
             break

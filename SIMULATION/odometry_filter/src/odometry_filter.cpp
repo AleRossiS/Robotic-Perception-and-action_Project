@@ -45,28 +45,50 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double x = 0.0;
         double y = 0.0;
         double theta = 0.0; // Radianti
+
+        double Pxx = 0.01;  // Cov X
+        double Pyy = 0.01;  // Cov Y
+        double Ptt = 0.01; // Cov Theta
     } _state;
 
     // Parametri Cinematici (Calibrati)
     struct Params {
         double wheel_radius_left = 0.0873;  // RL [m] (Esempio, da calibrare)
         double wheel_radius_right = 0.0857; // RR [m]
-        double baseline = 0.8291;            // B [m]
+        double baseline = 0.8291;            // B [m] No baseline needed with gyro
         double ticks_per_rev = 4096.0;     // Risoluzione Encoder
+
+        // kalman tuning
+        double sigma_v = 0.01;  // vel uncertainty encoder
+        double sigma_w = 0.005; // gyro uncertainty
+        double sigma_rs_pos = 0.5;  // RealSense uncertainty
+        double sigma_rs_ang = 0.2;  // RealSense angle uncertainty
     } _conf;
 
-    // Variabili "buffer" per comunicare tra load_data e process
+    // BUffer data:
     long _incoming_ticks_l = 0;
     long _incoming_ticks_r = 0;
-    bool _has_new_data = false;
-    string _last_agent_id = "";
-    double _last_timestamp = 0.0;
-    bool _has_timestamp = false;
 
-    // Memoria per calcolo differenziale
+    // Encoder memory
     long _prev_ticks_l = 0;
     long _prev_ticks_r = 0;
     bool _initialized = false;
+    bool _has_new_encoder_data = false;
+
+    string _last_agent_id = "";
+    double _last_timestamp = 0.0;
+    double _prev_time = 0.0;
+    bool _has_timestamp = false;
+
+    // double _current_gyro_z = 0.0;
+
+    // Correction data RealSense
+    double _rs_x = 0.0;
+    double _rs_y = 0.0;
+    double _rs_theta = 0.0;
+    bool _has_rs_update = false;
+
+   
 
 public:
 
@@ -75,105 +97,154 @@ public:
 
   map<string, string> info() override {
         return {
-            {"type", "RK2 Odometry Filter"},
+            {"type", "EK Filter ( ENCODERS * REALSENSE ONLY)"},
         };
   }
 
-  // --- FASE 1: RICEZIONE DATI 
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
     bool found = false;
-            // Cerchiamo gli encoder nel JSON in arrivo
-            if (in.contains("/message/encoders/left") && in.contains("/message/encoders/right")) {
-                _incoming_ticks_l = (long)in["/message/encoders/left"].get<double>();
-                _incoming_ticks_r = (long)in["/message/encoders/right"].get<double>();
-                found = true;
-            } 
-            else if (in.contains("encoders/left") && in.contains("encoders/right")) {
-                _incoming_ticks_l = (long)in["/encoders/left"].get<double>();
-                _incoming_ticks_r = (long)in["/encoders/right"].get<double>();
-                found = true;
-            } 
-            else if(in.contains("message") && in["message"].contains("encoders")){
-                _incoming_ticks_l = (long)in["message"]["encoders"]["left"].get<double>();
-                _incoming_ticks_r = (long)in["message"]["encoders"]["right"].get<double>();
-                found = true;
-            }
-            else if(in.contains("encoders")){
-                _incoming_ticks_l = (long)in["encoders"]["left"].get<double>();
-                _incoming_ticks_r = (long)in["encoders"]["right"].get<double>();
-                found = true;
-            }
 
-            if(!found) return return_type::error; // No encoder data, skip
+    // Timestamp
+    double now = 0.0;
+    if(in.contains("message") && in["message"].contains("timecode")){
+        now = in["message"]["timecode"].get<double>();
+    } else if (in.contains("/message/timecode")) {
+        now = in["/message/timecode"].get<double>();
+    } else if (in.contains("timecode") && in["timecode"].is_number()){
+        now = in["timecode"].get<double>();
+    }
+    if(now > 0) {
+        _last_timestamp = now;
+        _has_timestamp = true;
+    }
 
-            _has_new_data = true;
-
-            // Salviamo metadati se ci sono
-            if (in.contains("agent_id")) _last_agent_id = in["agent_id"].get<string>();
-
-            if(in.contains("message") && in["message"].contains("timecode") && in["message"]["timecode"].is_number()){
-                auto& tc = in["message"]["timecode"];
-                if(tc.is_number()) _last_timestamp = tc.get<double>();
-            } else if (in.contains("/message/timecode") && in["/message/timecode"].is_number()) {
-                _last_timestamp = in["/message/timecode"].get<double>();
-            } else if (in.contains("timecode") && in["timecode"].is_number()) {
-                    _last_timestamp = in["timecode"].get<double>();
-            } 
-
-    } catch (const std::exception &e) {
-            return return_type::error;
-        }
-        return return_type::success;
-  }
-
-  // --- FASE 2: ELABORAZIONE E OUTPUT (Override obbligatorio) ---
-    return_type process(json &out) override {
-        out.clear();
-
-        // Se non abbiamo ricevuto nuovi dati encoder, non calcoliamo nulla
-        if (!_has_new_data) {
-            return return_type::success; // O warning, dipende dalla logica
+    // Encoders
+    if (in.contains("/message/encoders/left") || (in.contains("message") && in["message"].contains("encoders"))) {
+        if (in.contains("/message/encoders/left")) {
+            _incoming_ticks_l = (long)in["/message/encoders/left"].get<double>();
+            _incoming_ticks_r = (long)in["/message/encoders/right"].get<double>();
+        } else {
+            _incoming_ticks_l = (long)in["message"]["encoders"]["left"].get<double>();
+            _incoming_ticks_r = (long)in["message"]["encoders"]["right"].get<double>();
         }
 
-        // 1. INIZIALIZZAZIONE (Primo avvio)
         if (!_initialized) {
             _prev_ticks_l = _incoming_ticks_l;
             _prev_ticks_r = _incoming_ticks_r;
+            _prev_time = _last_timestamp;
             _initialized = true;
-            _has_new_data = false; // Consumato
-            return return_type::success;
+        } else {
+            _has_new_encoder_data = true;
+        }
+    }
+    
+    // Giroscopio (Z)
+    //if (in.contains("message") && in["message"].contains("imu")) {
+    //  auto& imu = in["message"]["imu"];
+    //  if(imu.contains("middle") && imu["middle"]["gyroscopes"].contains("z")) {
+    //    _current_gyro_z = imu["middle"]["gyroscopes"]["z"].get<double>();
+    //  }
+    //} else if (in.contains("/message/imu/middle/gyroscopes/z")) {
+    //  _current_gyro_z = in["/message/imu/middle/gyroscopes/z"].get<double>();
+    //}
+
+    // RealSense
+    if (in.contains("message") && in["message"].contains("pose")) {
+      auto& p = in["message"]["pose"];
+        // Position
+        if (p.contains("position")) {
+            _rs_x = p["position"][0].get<double>();
+            _rs_y = p["position"][1].get<double>();
+        }
+        if (p.contains("attitude_along_z")) {
+            _rs_theta = p["attitude_along_z"].get<double>();
+        }
+        if (abs(_rs_x) > 0.001 || abs(_rs_y) > 0.001) _has_rs_update = true;
+    } else if (in.contains("/message/pose/position/0")) {
+            _rs_x = in["/message/pose/position/0"].get<double>();
+            _rs_y = in["/message/pose/position/1"].get<double>();
+            _rs_theta = in["/message/pose/attitude_along_z"].get<double>();
+            if (abs(_rs_x) > 0.001 || abs(_rs_y) > 0.001) _has_rs_update = true;
+    }
+
+    if (in.contains("agent_id")) _last_agent_id = in["agent_id"].get<string>();
+
+  } catch (...){ return return_type::error; }
+    return return_type::success;
+  }
+    
+
+
+  // EKF Process
+    return_type process(json &out) override {
+        out.clear();
+
+        // if no new data, skip
+        if (!_has_new_encoder_data) {
+            return return_type::success; // O warning,
         }
 
-        // 2. CALCOLO DELTA
         long d_ticks_l = _incoming_ticks_l - _prev_ticks_l;
         long d_ticks_r = _incoming_ticks_r - _prev_ticks_r;
-
-        // Aggiorniamo lo storico
         _prev_ticks_l = _incoming_ticks_l;
         _prev_ticks_r = _incoming_ticks_r;
-        _has_new_data = false; // Dato consumato
+        _has_new_encoder_data = false;
+
+        double dt = _last_timestamp - _prev_time;
+        if (dt <= 0) dt = 1e-6;
+        _prev_time = _last_timestamp;
 
         // 3. MODELLO CINEMATICO
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
         double d_right = (d_ticks_r / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_right;
-
         double ds = (d_right + d_left) / 2.0;
-        double d_alpha = (d_right - d_left) / _conf.baseline;
 
-        // 4. INTEGRAZIONE RUNGE-KUTTA 2
-        double avg_theta = _state.theta + (d_alpha / 2.0);
-        
+        // Rotation
+        //double d_theta = _current_gyro_z * dt;
+        double d_theta = (d_right - d_left) / _conf.baseline;
+        double avg_theta = _state.theta + d_theta / 2.0;
+
+        // Update state
         _state.x += ds * cos(avg_theta);
         _state.y += ds * sin(avg_theta);
-        _state.theta += d_alpha;
+        _state.theta += d_theta;
 
-        // Normalizzazione Theta
+        // Normalization Theta
         while (_state.theta > M_PI) _state.theta -= 2.0 * M_PI;
         while (_state.theta < -M_PI) _state.theta += 2.0 * M_PI;
+        
+        _state.Pxx += _conf.sigma_v * abs(ds);
+        _state.Pyy += _conf.sigma_v * abs(ds);
+        _state.Ptt += _conf.sigma_w * abs(d_theta);
 
-        // 5. SCRITTURA OUTPUT
+        // Correction
+        if(_has_rs_update){
+            // Position correction
+            double K_x = _state.Pxx / (_state.Pxx + _conf.sigma_rs_pos);
+            double K_y = _state.Pyy / (_state.Pyy + _conf.sigma_rs_pos);
+
+            _state.x += K_x * (_rs_x - _state.x);
+            _state.y += K_y * (_rs_y - _state.y);
+
+            _state.Pxx *= (1.0 - K_x);
+            _state.Pyy *= (1.0 - K_y);
+
+            // Angle correction
+            double y_theta = _rs_theta - _state.theta;
+            while (y_theta > M_PI) y_theta -= 2.0 * M_PI;
+            while (y_theta < -M_PI) y_theta += 2.0 * M_PI;
+
+            double K_t = _state.Ptt / (_state.Ptt + _conf.sigma_rs_ang);
+
+            _state.theta += K_t * y_theta;
+            _state.Ptt *= (1.0 - K_t);
+
+            _has_rs_update = false;
+        }
+
+        // OUTPUT
         out["pose"]["position"]["x"] = _state.x;
         out["pose"]["position"]["y"] = _state.y;
         out["pose"]["position"]["z"] = 0.0;
@@ -202,10 +273,15 @@ public:
     if (p.contains("baseline")) _conf.baseline = p["baseline"];
     if (p.contains("ticks_per_rev")) _conf.ticks_per_rev = p["ticks_per_rev"];
 
+    if(p.contains("sigma_v")) _conf.sigma_v = p["sigma_v"];
+    if(p.contains("sigma_w")) _conf.sigma_w = p["sigma_w"];
+    if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
+    if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
+
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
    // _params.merge_patch(*(json *)params);
-    _state = {0, 0, 0};
+    _state = {0, 0, 0, 0.01, 0.01, 0.01};
     _initialized = false;
       
   }

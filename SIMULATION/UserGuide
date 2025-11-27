@@ -1,4 +1,3 @@
-This file contains information on how to run MADS. (Spoiler so many terminals)
 
 The guide summerise how to use the replay plugin, rerunn plugin and any other plugin your are creating.
 
@@ -58,6 +57,8 @@ To make MADS use your local mads.ini file:
 sudo rm /usr/local/etc/mads.ini
 sudo ln -sf $(pwd)/mads.ini /usr/local/etc/mads.ini
 
+il comodo di questo è che ora si può modificare direttamente il mads.ini in locale, senza dover entrare in cartelle protette
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 INSTALLING RERUN.IO
@@ -75,7 +76,7 @@ To check if the viewer starts
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-RUNNING THE SIMULATION
+RUNNING THE SIMULATION ------ OUTDATED BUT USEFULL TO RUN SINGLE AGENTS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 After this step, you are ready to run the simulation:
@@ -100,14 +101,29 @@ mads filter odometry_filter.plugin -n "odometry_filter"
 
 mads source replay.plugin -n "encoders_source"
 
+- To check what is happening:
+mads feedback
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+HOW WE CURRENTLY RUN THE SIMULATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Inside the SIMULATION folder in the terminal:
+./run_all.sh
+
+if it does not work it means you either did not link your plugins or mads file. Or you need to manually build again the plugin (the setup only checks if you have the build folder)
+
+CREARE UN LINK PER IL PLUGIN:
+esempio
+sudo ln -sf /home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/odometry_filter.plugin /usr/local/lib/odometry_filter.plugin
+
+check:
+ls -l /usr/local/lib/odometry_filter.plugin
 
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 Comandi di Debug utili:
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 Se mads broker non funziona e ritorna qualcosa come:
 
@@ -129,12 +145,6 @@ pkill -f mads-brok (nome del processo)
 o manualmente:
 kill -9 <PID>
 
-CREARE UN LINK PER IL PLUGIN:
-esempio
-sudo ln -sf /home/lorenzo/Documents/RoboticPerception/odometry_filter/buildd/odometry_filter.plugin /usr/local/lib/odometry_filter.plugin
-
-check:
-ls -l /usr/local/lib/odometry_filter.plugin
 
 
 
