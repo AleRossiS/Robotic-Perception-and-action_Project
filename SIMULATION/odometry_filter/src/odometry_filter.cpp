@@ -22,6 +22,8 @@
 #include <iostream>
 #include <map>
 #include <vector> 
+#include <deque>
+#include <numeric>
 // Define the name of the plugin
 #ifndef PLUGIN_NAME
 #define PLUGIN_NAME "odometry_filter"
@@ -35,6 +37,26 @@ using json = nlohmann::json;
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+class MovingAverage {
+    std::deque<double> _window;
+    size_t _size;
+    double _sum;
+public:
+    MovingAverage(size_t size = 10) : _size(size), _sum(0.0) {}
+    
+    void resize(size_t new_size) { _size = new_size; _window.clear(); _sum = 0.0; }
+
+    double update(double val) {
+        _window.push_back(val);
+        _sum += val;
+        if (_window.size() > _size) {
+            _sum -= _window.front();
+            _window.pop_front();
+        }
+        return _sum / _window.size();
+    }
+};
 
 // Plugin class. This shall be the only part that needs to be modified,
 // implementing the actual functionality
@@ -62,7 +84,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double sigma_v = 0.01;  // vel uncertainty encoder
         double sigma_w = 0.005; // gyro uncertainty
         double sigma_rs_pos = 0.5;  // RealSense uncertainty
-        double sigma_rs_ang = 0.2;  // RealSense angle uncertainty
+        double sigma_rs_ang = 0.1;  // RealSense angle uncertainty
+
+        int filter_window = 10;
     } _conf;
 
     // BUffer data:
@@ -75,12 +99,21 @@ class Odometry_filterPlugin : public Filter<json, json> {
     bool _initialized = false;
     bool _has_new_encoder_data = false;
 
+    // Moving Average Filters
+    MovingAverage _filter_x;
+    MovingAverage _filter_y;
+    MovingAverage _filter_theta;
+
     string _last_agent_id = "";
     double _last_timestamp = 0.0;
     double _prev_time = 0.0;
     bool _has_timestamp = false;
 
     // double _current_gyro_z = 0.0;
+
+    // Memory for anti-freeze check
+    double _prev_raw_rs_x = -9999.0;
+    double _prev_raw_rs_y = -9999.0;
 
     // Correction data RealSense
     double _rs_x = 0.0;
@@ -101,10 +134,11 @@ public:
         };
   }
 
+  Odometry_filterPlugin() : _filter_x(10), _filter_y(10), _filter_theta(10) {}
+
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
-    bool found = false;
 
     // Timestamp
     double now = 0.0;
@@ -112,8 +146,6 @@ public:
         now = in["message"]["timecode"].get<double>();
     } else if (in.contains("/message/timecode")) {
         now = in["/message/timecode"].get<double>();
-    } else if (in.contains("timecode") && in["timecode"].is_number()){
-        now = in["timecode"].get<double>();
     }
     if(now > 0) {
         _last_timestamp = now;
@@ -151,23 +183,37 @@ public:
     //}
 
     // RealSense
+    double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
+
     if (in.contains("message") && in["message"].contains("pose")) {
       auto& p = in["message"]["pose"];
         // Position
         if (p.contains("position")) {
-            _rs_x = p["position"][0].get<double>();
-            _rs_y = p["position"][1].get<double>();
+            raw_rs_x = p["position"][0].get<double>();
+            raw_rs_y = p["position"][1].get<double>();
         }
         if (p.contains("attitude_along_z")) {
-            _rs_theta = p["attitude_along_z"].get<double>();
+            raw_rs_theta = p["attitude_along_z"].get<double>();
         }
-        if (abs(_rs_x) > 0.001 || abs(_rs_y) > 0.001) _has_rs_update = true;
     } else if (in.contains("/message/pose/position/0")) {
-            _rs_x = in["/message/pose/position/0"].get<double>();
-            _rs_y = in["/message/pose/position/1"].get<double>();
-            _rs_theta = in["/message/pose/attitude_along_z"].get<double>();
-            if (abs(_rs_x) > 0.001 || abs(_rs_y) > 0.001) _has_rs_update = true;
+            raw_rs_x = in["/message/pose/position/0"].get<double>();
+            raw_rs_y = in["/message/pose/position/1"].get<double>();
+            raw_rs_theta = in["/message/pose/attitude_along_z"].get<double>();
     }
+
+    if ((abs(raw_rs_x) > 0.001 || abs(raw_rs_y) > 0.001)) {
+      double dist = sqrt(pow(raw_rs_x - _prev_raw_rs_x, 2) + pow(raw_rs_y - _prev_raw_rs_y, 2));
+      if (dist > 0.0001) { // Not stuck
+                _rs_x = _filter_x.update(raw_rs_x);
+                _rs_y = _filter_y.update(raw_rs_y);
+                _rs_theta = _filter_theta.update(raw_rs_theta);
+                
+                _has_rs_update = true;
+
+                _prev_raw_rs_x = raw_rs_x;
+                _prev_raw_rs_y = raw_rs_y;
+            }
+          }
 
     if (in.contains("agent_id")) _last_agent_id = in["agent_id"].get<string>();
 
@@ -277,12 +323,20 @@ public:
     if(p.contains("sigma_w")) _conf.sigma_w = p["sigma_w"];
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
     if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
+    if (p.contains("filter_window")) {
+            _conf.filter_window = p["filter_window"];
+            _filter_x.resize(_conf.filter_window);
+            _filter_y.resize(_conf.filter_window);
+            _filter_theta.resize(_conf.filter_window);
+        }
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
    // _params.merge_patch(*(json *)params);
     _state = {0, 0, 0, 0.01, 0.01, 0.01};
     _initialized = false;
+    _prev_raw_rs_x = -9999.0;
+    _prev_raw_rs_y = -9999.0;
       
   }
 /*
