@@ -15,7 +15,7 @@ addpath("funzioni");
 run("estraz_dati.m");
 
 % Baseline
-b = 0.9; %m
+b = 1; %m
 % Wheel radii
 R = [0.1 0.1]; %m
 % Kinematic Parameters
@@ -239,8 +239,8 @@ axis("equal");
 %% Calibration
 
 % Calibration function call
-K_calib1 =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_REF1, y_REF1, theta_REF1);
-K_calib2 =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_REF2, y_REF2, theta_REF2);
+K_calib1 =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_REF1, y_REF1, theta_REF1)
+K_calib2 =  Calibration(K_param, Ntic_L, Ntic_R, Enc_res, x_REF2, y_REF2, theta_REF2)
 
 % pose_Enc = [x(t) y(t) theta(t)]
 pose_Enc_calib1 = EncodersMotion(K_calib1, Ntic_L, Ntic_R, Enc_res);

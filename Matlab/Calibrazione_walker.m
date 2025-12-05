@@ -83,8 +83,8 @@ for i=1:length(Ntic_R)
 
 
     % SIMULATION: Simulate the robot using the controller outputs.
-    robot.SimulateEnc(Tc, NTic_r, NTic_l);
-    robot.Show(path, Nplot, Xlim, Ylim);
+    % robot.SimulateEnc(Tc, NTic_r, NTic_l);
+    % robot.Show(path, Nplot, Xlim, Ylim);
     
 %     % PERCEPTION: Extract current location information ([X,Y]) from the 
 %     % current pose of the robot and ADD NOISE simulating the sensors inaccuracy
