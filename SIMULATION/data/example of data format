@@ -1,0 +1,153 @@
+imu_source: {
+  "_id": "6932f3a6677aab36f20384f1",
+  "agent_id": "imu_source",
+  "hostname": "lorenzo-XPS-13-7390",
+  "message": {
+    "accel": [
+      0.07234600186347961,
+      0.026961999014019966,
+      0.9747799634933472
+    ],
+    "compass": [
+      -31.611927032470703,
+      -4.535176753997803,
+      2.5305988788604736
+    ],
+    "fusionPose": [
+      0.02713850885629654,
+      -0.07498402148485184,
+      3.081998586654663
+    ],
+    "gyro": [
+      -0.0010861977934837341,
+      0.0012487322092056274,
+      0.00011874642223119736
+    ],
+    "hostname": "raspberrypi",
+    "timecode": 76957.905,
+    "timestamp": "2025-11-26T20:22:37.909Z"
+  },
+  "timecode": 38517.32,
+  "timestamp": {
+    "$date": "2025-12-09T10:41:57.342+0100"
+  },
+  "warning": {
+    "get_output": "timestamp field name is not allowed, it will be removed"
+  }
+}
+
+
+encoders_source: {
+  "_id": "6932f3a5677aab36f20384ac",
+  "agent_id": "encoders_source",
+  "hostname": "lorenzo-XPS-13-7390",
+  "message": {
+    "currents": {
+      "left": 0.0,
+      "right": 0.0
+    },
+    "encoders": {
+      "left": 26335.0,
+      "right": -16860.0
+    },
+    "hostname": "raspberrypi",
+    "timecode": 76957.557,
+    "timestamp": "2025-11-26T20:22:37.565Z"
+  },
+  "timecode": 38614.76,
+  "timestamp": {
+    "$date": "2025-12-09T10:43:34.761+0100"
+  },
+  "warning": {
+    "get_output": "timestamp field name is not allowed, it will be removed"
+  }
+}
+
+
+pose_rs_source: {
+  "_id": "6932f3a6677aab36f20384f4",
+  "agent_id": "pose_rs_source",
+  "hostname": "lorenzo-XPS-13-7390",
+  "message": {
+    "hostname": "raspberrypi",
+    "pose": {
+      "H": [
+        [
+          1.0,
+          -1.8019319628016332e-17,
+          0.0,
+          0.0
+        ],
+        [
+          -1.8019319628016332e-17,
+          1.0000000000000002,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "R": [
+        [
+          1.0,
+          -1.8019319628016332e-17,
+          0.0
+        ],
+        [
+          -1.8019319628016332e-17,
+          1.0000000000000002,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "attitude": [
+        [
+          0.0,
+          0.0,
+          -1.801931962801633e-17
+        ]
+      ],
+      "attitude_along_z": -1.8019319628016332e-17,
+      "attitude_deg": [
+        [
+          0.0,
+          0.0,
+          -1.0324309643825802e-15
+        ]
+      ],
+      "position": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    "timecode": 76957.926,
+    "timestamp": "2025-11-26T20:22:37.927Z"
+  },
+  "timecode": 38704.72,
+  "timestamp": {
+    "$date": "2025-12-09T10:45:04.723+0100"
+  },
+  "warning": {
+    "get_output": "timestamp field name is not allowed, it will be removed"
+  }
+}
+
+
+

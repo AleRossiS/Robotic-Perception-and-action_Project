@@ -81,12 +81,23 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double ticks_per_rev = 4096.0;     // Risoluzione Encoder
 
         // kalman tuning
-        double sigma_v = 0.01;  // vel uncertainty encoder
-        double sigma_w = 0.005; // gyro uncertainty
+        double sigma_v = 0.005;  // vel uncertainty encoder
+        double sigma_w = 0.002; // gyro uncertainty
         double sigma_rs_pos = 0.5;  // RealSense uncertainty
         double sigma_rs_ang = 0.1;  // RealSense angle uncertainty
 
         int filter_window = 10;
+
+        bool invert_gyro = false;  // Se il segno del giroscopio è invertito
+        bool invert_rs_x = false;      // Se la RS va a destra quando il robot va a sinistra
+        bool invert_rs_y = false;      // Se la RS va indietro quando il robot va avanti
+
+        bool invert_rs_theta = false;  // Se l'orientamento RS è opposto
+        
+
+        double cam_yaw_offset = 0.0;
+        double cam_offset_x = 0.0;
+        double cam_offset_y = 0.0;
     } _conf;
 
     // BUffer data:
@@ -107,9 +118,10 @@ class Odometry_filterPlugin : public Filter<json, json> {
     string _last_agent_id = "";
     double _last_timestamp = 0.0;
     double _prev_time = 0.0;
-    bool _has_timestamp = false;
 
-    // double _current_gyro_z = 0.0;
+    // IMU Data
+    double _current_gyro_z = 0.0;
+    bool _has_gyro = false;
 
     // Memory for anti-freeze check
     double _prev_raw_rs_x = -9999.0;
@@ -130,7 +142,7 @@ public:
 
   map<string, string> info() override {
         return {
-            {"type", "EK Filter ( ENCODERS * REALSENSE ONLY)"},
+            {"type", "EKF (Axis Alignment)"},
         };
   }
 
@@ -147,10 +159,7 @@ public:
     } else if (in.contains("/message/timecode")) {
         now = in["/message/timecode"].get<double>();
     }
-    if(now > 0) {
-        _last_timestamp = now;
-        _has_timestamp = true;
-    }
+    if(now > 0) _last_timestamp = now;
 
     // Encoders
     if (in.contains("/message/encoders/left") || (in.contains("message") && in["message"].contains("encoders"))) {
@@ -172,36 +181,58 @@ public:
         }
     }
     
-    // Giroscopio (Z)
-    //if (in.contains("message") && in["message"].contains("imu")) {
-    //  auto& imu = in["message"]["imu"];
-    //  if(imu.contains("middle") && imu["middle"]["gyroscopes"].contains("z")) {
-    //    _current_gyro_z = imu["middle"]["gyroscopes"]["z"].get<double>();
-    //  }
-    //} else if (in.contains("/message/imu/middle/gyroscopes/z")) {
-    //  _current_gyro_z = in["/message/imu/middle/gyroscopes/z"].get<double>();
-    //}
+    // --- 3. IMU (NUOVO FORMATO: Array Piatto) ---
+    if (in.contains("message") && in["message"].contains("gyro")) {
+      auto& gyro = in["message"]["gyro"];
+                
+      // Verifica che sia un array valido
+      if (gyro.is_array() && gyro.size() >= 3) {
+        // L'asse Z è l'indice 2 (x=0, y=1, z=2)
+        double raw_gyro = gyro[2].get<double>();
+        _current_gyro_z = _conf.invert_gyro ? -raw_gyro : raw_gyro;
+        _has_gyro = true; // Flag per dire "abbiamo dati freschi"
+      }
+    }     
 
     // RealSense
     double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
+    bool rs_found = false;
 
     if (in.contains("message") && in["message"].contains("pose")) {
       auto& p = in["message"]["pose"];
         // Position
-        if (p.contains("position")) {
-            raw_rs_x = p["position"][0].get<double>();
-            raw_rs_y = p["position"][1].get<double>();
+      if (p.contains("position")) {
+        auto& pos = p["position"];
+        // Check if it's [[x,y,z]] or [x,y,z]
+        if (pos.is_array() && pos.size() > 0) {
+            if (pos[0].is_array()) {
+                raw_rs_x = pos[0][0].get<double>();
+                raw_rs_y = pos[0][1].get<double>();
+            } else {
+                raw_rs_x = pos[0].get<double>();
+                raw_rs_y = pos[1].get<double>();
+            }
+            rs_found = true;
         }
-        if (p.contains("attitude_along_z")) {
-            raw_rs_theta = p["attitude_along_z"].get<double>();
-        }
-    } else if (in.contains("/message/pose/position/0")) {
-            raw_rs_x = in["/message/pose/position/0"].get<double>();
-            raw_rs_y = in["/message/pose/position/1"].get<double>();
-            raw_rs_theta = in["/message/pose/attitude_along_z"].get<double>();
+      }
+      
+      // Angle (Handle nested arrays)
+      if (p.contains("attitude_along_z")) {
+        auto& att = p["attitude_along_z"];
+        if (att.is_array()) raw_rs_theta = att[0].get<double>(); // If array
+        else raw_rs_theta = att.get<double>(); // If scalar
+      }
     }
 
-    if ((abs(raw_rs_x) > 0.001 || abs(raw_rs_y) > 0.001)) {
+    // Anti-freeze check & filtering
+    if (rs_found && (abs(raw_rs_x) > 0.001 || abs(raw_rs_y) > 0.001)) {
+      
+      if(_conf.invert_rs_x) raw_rs_x = -raw_rs_x;
+      if(_conf.invert_rs_y) raw_rs_y = -raw_rs_y;
+      if(_conf.invert_rs_theta) raw_rs_theta = -raw_rs_theta;
+
+      raw_rs_theta += _conf.cam_yaw_offset;
+
       double dist = sqrt(pow(raw_rs_x - _prev_raw_rs_x, 2) + pow(raw_rs_y - _prev_raw_rs_y, 2));
       if (dist > 0.0001) { // Not stuck
                 _rs_x = _filter_x.update(raw_rs_x);
@@ -248,8 +279,13 @@ public:
         double ds = (d_right + d_left) / 2.0;
 
         // Rotation
-        //double d_theta = _current_gyro_z * dt;
-        double d_theta = (d_right - d_left) / _conf.baseline;
+        double d_theta = 0.0;
+        if(_has_gyro){
+            d_theta = _current_gyro_z * dt;
+        } else {
+            // Fallback to encoders if gyro missing
+            d_theta = (d_right - d_left) / _conf.baseline;
+        }
         double avg_theta = _state.theta + d_theta / 2.0;
 
         // Update state
@@ -267,27 +303,34 @@ public:
 
         // Correction
         if(_has_rs_update){
-            // Position correction
-            double K_x = _state.Pxx / (_state.Pxx + _conf.sigma_rs_pos);
-            double K_y = _state.Pyy / (_state.Pyy + _conf.sigma_rs_pos);
 
-            _state.x += K_x * (_rs_x - _state.x);
-            _state.y += K_y * (_rs_y - _state.y);
+          double est_sensor_x = _state.x + cos(_state.theta) * _conf.cam_offset_x - sin(_state.theta) * _conf.cam_offset_y;
+          double est_sensor_y = _state.y + sin(_state.theta) * _conf.cam_offset_x + cos(_state.theta) * _conf.cam_offset_y;
+          // --- CORRECTION ---
+          double innov_x = _rs_x - est_sensor_x;
+          double innov_y = _rs_y - est_sensor_y;
+            
+          // Position correction
+          double K_x = _state.Pxx / (_state.Pxx + _conf.sigma_rs_pos);
+          double K_y = _state.Pyy / (_state.Pyy + _conf.sigma_rs_pos);
 
-            _state.Pxx *= (1.0 - K_x);
-            _state.Pyy *= (1.0 - K_y);
+          _state.x += K_x * innov_x;
+          _state.y += K_y * innov_y;
 
-            // Angle correction
-            double y_theta = _rs_theta - _state.theta;
-            while (y_theta > M_PI) y_theta -= 2.0 * M_PI;
-            while (y_theta < -M_PI) y_theta += 2.0 * M_PI;
+          _state.Pxx *= (1.0 - K_x);
+          _state.Pyy *= (1.0 - K_y);
 
-            double K_t = _state.Ptt / (_state.Ptt + _conf.sigma_rs_ang);
+          // Angle correction
+          double y_theta = _rs_theta - _state.theta;
+          while (y_theta > M_PI) y_theta -= 2.0 * M_PI;
+          while (y_theta < -M_PI) y_theta += 2.0 * M_PI;
 
-            _state.theta += K_t * y_theta;
-            _state.Ptt *= (1.0 - K_t);
+          double K_t = _state.Ptt / (_state.Ptt + _conf.sigma_rs_ang);
 
-            _has_rs_update = false;
+          _state.theta += K_t * y_theta;
+          _state.Ptt *= (1.0 - K_t);
+
+          _has_rs_update = false;
         }
 
         // OUTPUT
@@ -329,6 +372,16 @@ public:
             _filter_y.resize(_conf.filter_window);
             _filter_theta.resize(_conf.filter_window);
         }
+
+    if (p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
+    if (p.contains("invert_rs_x")) _conf.invert_rs_x = p["invert_rs_x"];
+    if (p.contains("invert_rs_y")) _conf.invert_rs_y = p["invert_rs_y"];
+    if (p.contains("invert_rs_theta")) _conf.invert_rs_theta = p["invert_rs_theta"];
+    
+
+    if( p.contains("cam_offset_x")) _conf.cam_offset_x = p["cam_offset_x"];
+    if( p.contains("cam_offset_y")) _conf.cam_offset_y = p["cam_offset_y"];
+    if( p.contains("cam_yaw_offset")) _conf.cam_yaw_offset = p["cam_yaw_offset"];
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
