@@ -12,6 +12,14 @@
 # Creation date: 2025-11-21T11:56:48.400+0100
 # NOTICE: MADS Version 1.4.0
 */
+/*
+# FINAL EKF: WEIGHTED SENSOR FUSION
+# Approach:
+# 1. Calculate Rotation from Encoders (High drift on turns)
+# 2. Calculate Rotation from Gyro (Drift over time, precise on turns)
+# 3. Fuse them based on Variance (Confidence)
+# 4. Use RealSense for absolute Position Correction
+*/
 // Mandatory included headers
 #include <filter.hpp>
 #include <nlohmann/json.hpp>
@@ -43,7 +51,7 @@ class MovingAverage {
     size_t _size;
     double _sum;
 public:
-    MovingAverage(size_t size = 10) : _size(size), _sum(0.0) {}
+    MovingAverage(size_t size = 5) : _size(size), _sum(0.0) {}
     
     void resize(size_t new_size) { _size = new_size; _window.clear(); _sum = 0.0; }
 
@@ -73,6 +81,17 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double Ptt = 0.01; // Cov Theta
     } _state;
 
+    struct StateRaw{
+        double x = 0.0;
+        double y = 0.0;
+        double theta = 0.0;
+    } _state_enc_only;
+
+    struct DebugState {
+        double theta_enc_only = 0.0;
+        double theta_imu_only = 0.0;
+    } _debug;
+
     // Parametri Cinematici (Calibrati)
     struct Params {
         double wheel_radius_left = 0.0873;  // RL [m] (Esempio, da calibrare)
@@ -81,23 +100,22 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double ticks_per_rev = 4096.0;     // Risoluzione Encoder
 
         // kalman tuning
-        double sigma_v = 0.005;  // vel uncertainty encoder
-        double sigma_w = 0.002; // gyro uncertainty
-        double sigma_rs_pos = 0.5;  // RealSense uncertainty
-        double sigma_rs_ang = 0.1;  // RealSense angle uncertainty
+        //double sigma_v = 0.005;  // vel uncertainty encoder
+        //double sigma_w = 0.002; // gyro uncertainty
+        double sigma_rs_pos = 0.8;  // RealSense uncertainty
+        double sigma_rs_ang = 0.5;  // RealSense angle uncertainty
 
-        int filter_window = 10;
+        double sigma_enc_lin = 0.005; // Errore encoder lineare (m/s)
+        double sigma_enc_rot = 0.05;  // Errore encoder rotazionale (rad/s)
+        double sigma_gyro    = 0.002; // Errore giroscopio (rad/s)
 
-        bool invert_gyro = false;  // Se il segno del giroscopio è invertito
-        bool invert_rs_x = false;      // Se la RS va a destra quando il robot va a sinistra
-        bool invert_rs_y = false;      // Se la RS va indietro quando il robot va avanti
+        int filter_window_rs = 10;
+        int filter_window_imu = 5;      
 
-        bool invert_rs_theta = false;  // Se l'orientamento RS è opposto
-        
-
-        double cam_yaw_offset = 0.0;
+        double rs_global_rotation = 0.0;
         double cam_offset_x = 0.0;
         double cam_offset_y = 0.0;
+        bool invert_gyro = true;
     } _conf;
 
     // BUffer data:
@@ -111,15 +129,16 @@ class Odometry_filterPlugin : public Filter<json, json> {
     bool _has_new_encoder_data = false;
 
     // Moving Average Filters
-    MovingAverage _filter_x;
-    MovingAverage _filter_y;
-    MovingAverage _filter_theta;
+    MovingAverage _filter_rs_x;
+    MovingAverage _filter_rs_y;
+    MovingAverage _filter_rs_theta;
 
     string _last_agent_id = "";
     double _last_timestamp = 0.0;
     double _prev_time = 0.0;
 
     // IMU Data
+    MovingAverage _filter_gyro;
     double _current_gyro_z = 0.0;
     bool _has_gyro = false;
 
@@ -142,12 +161,11 @@ public:
 
   map<string, string> info() override {
         return {
-            {"type", "EKF (Axis Alignment)"},
+            {"type", "EKF + Raw Encoder Debug"},
         };
   }
 
-  Odometry_filterPlugin() : _filter_x(10), _filter_y(10), _filter_theta(10) {}
-
+  Odometry_filterPlugin() : _filter_rs_x(10), _filter_rs_y(10), _filter_rs_theta(10), _filter_gyro(5) {}
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
@@ -189,8 +207,9 @@ public:
       if (gyro.is_array() && gyro.size() >= 3) {
         // L'asse Z è l'indice 2 (x=0, y=1, z=2)
         double raw_gyro = gyro[2].get<double>();
-        _current_gyro_z = _conf.invert_gyro ? -raw_gyro : raw_gyro;
-        _has_gyro = true; // Flag per dire "abbiamo dati freschi"
+        if (_conf.invert_gyro) raw_gyro = -raw_gyro;
+        _current_gyro_z = _filter_gyro.update(raw_gyro);
+        _has_gyro = true; 
       }
     }     
 
@@ -201,20 +220,18 @@ public:
     if (in.contains("message") && in["message"].contains("pose")) {
       auto& p = in["message"]["pose"];
         // Position
-      if (p.contains("position")) {
-        auto& pos = p["position"];
+      if (p.contains("position") && p["position"].is_array() && p["position"].size() > 0) {
         // Check if it's [[x,y,z]] or [x,y,z]
-        if (pos.is_array() && pos.size() > 0) {
-            if (pos[0].is_array()) {
-                raw_rs_x = pos[0][0].get<double>();
-                raw_rs_y = pos[0][1].get<double>();
-            } else {
-                raw_rs_x = pos[0].get<double>();
-                raw_rs_y = pos[1].get<double>();
-            }
-            rs_found = true;
+        if (p["position"][0].is_array()) {
+          raw_rs_x = p["position"][0][0].get<double>();
+          raw_rs_y = p["position"][0][1].get<double>();
+        } else {
+          raw_rs_x = p["position"][0].get<double>();
+          raw_rs_y = p["position"][1].get<double>();
         }
+        rs_found = true;
       }
+      
       
       // Angle (Handle nested arrays)
       if (p.contains("attitude_along_z")) {
@@ -226,18 +243,21 @@ public:
 
     // Anti-freeze check & filtering
     if (rs_found && (abs(raw_rs_x) > 0.001 || abs(raw_rs_y) > 0.001)) {
-      
-      if(_conf.invert_rs_x) raw_rs_x = -raw_rs_x;
-      if(_conf.invert_rs_y) raw_rs_y = -raw_rs_y;
-      if(_conf.invert_rs_theta) raw_rs_theta = -raw_rs_theta;
 
-      raw_rs_theta += _conf.cam_yaw_offset;
+      //Specchio
+        double rot = _conf.rs_global_rotation;
+        double x_new = -(raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
+        double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
+        raw_rs_x = x_new;
+        raw_rs_y = y_new;
+        raw_rs_theta += rot;
+      
 
       double dist = sqrt(pow(raw_rs_x - _prev_raw_rs_x, 2) + pow(raw_rs_y - _prev_raw_rs_y, 2));
       if (dist > 0.0001) { // Not stuck
-                _rs_x = _filter_x.update(raw_rs_x);
-                _rs_y = _filter_y.update(raw_rs_y);
-                _rs_theta = _filter_theta.update(raw_rs_theta);
+                _rs_x = _filter_rs_x.update(raw_rs_x);
+                _rs_y = _filter_rs_y.update(raw_rs_y);
+                _rs_theta = _filter_rs_theta.update(raw_rs_theta);
                 
                 _has_rs_update = true;
 
@@ -273,33 +293,56 @@ public:
         if (dt <= 0) dt = 1e-6;
         _prev_time = _last_timestamp;
 
-        // 3. MODELLO CINEMATICO
+        // --- PREDICTION (Usa Gyroscope!) ---
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
         double d_right = (d_ticks_r / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_right;
         double ds = (d_right + d_left) / 2.0;
 
-        // Rotation
-        double d_theta = 0.0;
+        // Rotation from Encoders
+        double d_theta_enc = (d_right - d_left) / _conf.baseline;
+
+        // Rotation gyro
+        double d_theta_gyro = 0.0;
         if(_has_gyro){
-            d_theta = _current_gyro_z * dt;
-        } else {
-            // Fallback to encoders if gyro missing
-            d_theta = (d_right - d_left) / _conf.baseline;
+            d_theta_gyro = _current_gyro_z * dt;
+        } 
+
+        // Update raw encoder only state
+        double avg_theta_enc = _state_enc_only.theta + d_theta_enc / 2.0;
+        _state_enc_only.x += ds * cos(avg_theta_enc);
+        _state_enc_only.y += ds * sin(avg_theta_enc);
+        _state_enc_only.theta += d_theta_enc;
+
+
+        double var_enc = _conf.sigma_enc_rot * _conf.sigma_enc_rot;
+        double var_gyro = _conf.sigma_gyro * _conf.sigma_gyro;
+
+        double weight_gyro = 0.0;
+        double weight_enc = 1.0;
+        if(_has_gyro){
+            weight_gyro = var_enc / (var_enc + var_gyro);
+            weight_enc = var_gyro / (var_enc + var_gyro);
         }
-        double avg_theta = _state.theta + d_theta / 2.0;
+
+        double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
+
+        double avg_theta = _state.theta + d_theta_fused / 2.0;
+        
 
         // Update state
         _state.x += ds * cos(avg_theta);
         _state.y += ds * sin(avg_theta);
-        _state.theta += d_theta;
+        _state.theta += d_theta_fused;
 
         // Normalization Theta
         while (_state.theta > M_PI) _state.theta -= 2.0 * M_PI;
         while (_state.theta < -M_PI) _state.theta += 2.0 * M_PI;
         
-        _state.Pxx += _conf.sigma_v * abs(ds);
-        _state.Pyy += _conf.sigma_v * abs(ds);
-        _state.Ptt += _conf.sigma_w * abs(d_theta);
+        _state.Pxx += _conf.sigma_enc_lin * abs(ds);
+        _state.Pyy += _conf.sigma_enc_lin * abs(ds);
+
+        double combined_sigma = sqrt(pow(_conf.sigma_gyro * weight_gyro, 2) + pow(_conf.sigma_enc_rot * weight_enc, 2));
+        _state.Ptt += combined_sigma * abs(d_theta_fused);
 
         // Correction
         if(_has_rs_update){
@@ -333,6 +376,9 @@ public:
           _has_rs_update = false;
         }
 
+        _debug.theta_enc_only = d_theta_enc;
+        _debug.theta_imu_only = d_theta_gyro;
+
         // OUTPUT
         out["pose"]["position"]["x"] = _state.x;
         out["pose"]["position"]["y"] = _state.y;
@@ -341,6 +387,12 @@ public:
 
         std::vector<double> pos_vec = {_state.x, _state.y, 0.0};
         out["pose_vector"] = pos_vec;
+
+        out["debug"]["raw_encoder_only"] = std::vector<double>{_state_enc_only.x, _state_enc_only.y, 0.0};
+
+        out["debug"]["theta_enc"] = _debug.theta_enc_only;
+        out["debug"]["theta_imu"] = _debug.theta_imu_only;
+        //out["debug"]["theta_fused"] = _state.theta;
         
         if (!_last_agent_id.empty()) out["source_id"] = _last_agent_id;
         out["sim_time"] = _last_timestamp;
@@ -362,31 +414,36 @@ public:
     if (p.contains("baseline")) _conf.baseline = p["baseline"];
     if (p.contains("ticks_per_rev")) _conf.ticks_per_rev = p["ticks_per_rev"];
 
-    if(p.contains("sigma_v")) _conf.sigma_v = p["sigma_v"];
-    if(p.contains("sigma_w")) _conf.sigma_w = p["sigma_w"];
+    if(p.contains("sigma_enc_lin")) _conf.sigma_enc_lin = p["sigma_enc_lin"];
+    if(p.contains("sigma_enc_rot")) _conf.sigma_enc_rot = p["sigma_enc_rot"];
+    if(p.contains("sigma_gyro")) _conf.sigma_gyro = p["sigma_gyro"];
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
     if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
-    if (p.contains("filter_window")) {
-            _conf.filter_window = p["filter_window"];
-            _filter_x.resize(_conf.filter_window);
-            _filter_y.resize(_conf.filter_window);
-            _filter_theta.resize(_conf.filter_window);
-        }
 
-    if (p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
-    if (p.contains("invert_rs_x")) _conf.invert_rs_x = p["invert_rs_x"];
-    if (p.contains("invert_rs_y")) _conf.invert_rs_y = p["invert_rs_y"];
-    if (p.contains("invert_rs_theta")) _conf.invert_rs_theta = p["invert_rs_theta"];
+    if (p.contains("filter_window_rs")) {
+            _conf.filter_window_rs = p["filter_window_rs"];
+            _filter_rs_x.resize(_conf.filter_window_rs);
+            _filter_rs_y.resize(_conf.filter_window_rs);
+    }
+
+    if (p.contains("filter_window_imu")) {
+      _conf.filter_window_imu = p["filter_window_imu"];
+      _filter_gyro.resize(_conf.filter_window_imu);
+    }
+
     
 
     if( p.contains("cam_offset_x")) _conf.cam_offset_x = p["cam_offset_x"];
     if( p.contains("cam_offset_y")) _conf.cam_offset_y = p["cam_offset_y"];
-    if( p.contains("cam_yaw_offset")) _conf.cam_yaw_offset = p["cam_yaw_offset"];
+    if( p.contains("rs_global_rotation")) _conf.rs_global_rotation = p["rs_global_rotation"];
+    if( p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
    // _params.merge_patch(*(json *)params);
     _state = {0, 0, 0, 0.01, 0.01, 0.01};
+    _state_enc_only = {0,0,0}; // Reset stato raw
+    _debug = {0,0};
     _initialized = false;
     _prev_raw_rs_x = -9999.0;
     _prev_raw_rs_y = -9999.0;
