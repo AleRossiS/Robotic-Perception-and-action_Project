@@ -122,9 +122,9 @@ DegZ_ARUCO = interp1(T_ARUCO_V, DegZ_ARUCO_V, Tempo_Synched, 'pchip');
 
 % --- 3.2. Interpolazione Dati IMU ---
 
-OmegaX_IMU = interp1(T_IMU_V, OmegaX_IMU_V, Tempo_Synched, 'pchip') * RadToDeg;
-OmegaY_IMU = interp1(T_IMU_V, OmegaY_IMU_V, Tempo_Synched, 'pchip') * RadToDeg;
-OmegaZ_IMU = interp1(T_IMU_V, OmegaZ_IMU_V, Tempo_Synched, 'pchip') * RadToDeg;
+OmegaX_IMU = interp1(T_IMU_V, OmegaX_IMU_V, Tempo_Synched, 'pchip');
+OmegaY_IMU = interp1(T_IMU_V, OmegaY_IMU_V, Tempo_Synched, 'pchip');
+OmegaZ_IMU = interp1(T_IMU_V, OmegaZ_IMU_V, Tempo_Synched, 'pchip');
 
 AccX_IMU = interp1(T_IMU_V, AccX_IMU_V, Tempo_Synched, 'pchip');
 AccY_IMU = interp1(T_IMU_V, AccY_IMU_V, Tempo_Synched, 'pchip');
