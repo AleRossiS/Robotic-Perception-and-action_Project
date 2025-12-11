@@ -1,4 +1,5 @@
 %% --- 1. Caricamento Dati ---
+addpath("ExtrinsicCalibration");
 
 % Specifica il nome dei tuoi file
 fileNameHTC = 'extrinsic_calibration.htc.csv';
@@ -112,6 +113,9 @@ T_synced.Properties.VariableNames = {'Tempo [s]', ...
     'X_HTC [m]', 'Y_HTC [m]', 'Z_HTC [m]', ...
     'DegX_HTC [deg]', 'DegY_HTC [deg]', 'DegZ_HTC [deg]', ...
     'Left_ENC [tic]', 'Right_ENC [tic]'};
+
+
+clearvars -except T_synced
 
 T_synced
 
