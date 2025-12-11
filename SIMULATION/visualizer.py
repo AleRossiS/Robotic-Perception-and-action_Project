@@ -10,7 +10,7 @@ from rerun.archetypes import Scalars
 SHOW_3D = True 
 # Finestra per la media mobile (solo visualizzazione)
 SMOOTH_WINDOW = 10 
-RS_YAW_OFFSET = -135.0 * (3.14159 / 180.0)
+RS_YAW_OFFSET = 0.0 * (3.14159 / 180.0)
 RS_POS_OFFSET_X = 0.0 
 RS_POS_OFFSET_Y = 0.0 
 
@@ -55,8 +55,8 @@ def get_nested(data, path):
     
 def rotate_point(x, y, theta):
     """Ruota un punto (x,y) di un angolo theta."""
-    x_new = x * math.cos(theta) - y * math.sin(theta)
-    y_new = x * math.sin(theta) + y * math.cos(theta)
+    x_new = -(x * math.cos(theta) - y * math.sin(theta))
+    y_new = (x * math.sin(theta) + y * math.cos(theta))
     return x_new, y_new
 
 def main():
@@ -162,8 +162,26 @@ def main():
                     # Scia
                     rr.log("robot/est_path", rr.LineStrips3D([traj_odometry], colors=[[255, 0, 0]], radii=0.005))
                     
+                # NUOVO: Grafico Comparativo Angoli (Chi comanda?)
+                if "debug" in data:
+                    th_enc = data["debug"].get("theta_enc")
+                    th_imu = data["debug"].get("theta_imu")
+                    #th_fus = data["debug"].get("theta_fused")
+                    
+                    if th_enc is not None: rr.log("fusion/debug/theta_encoder", Scalars(th_enc))
+                    if th_imu is not None: rr.log("fusion/debug/theta_imu", Scalars(th_imu))
+                    #if th_fus is not None: rr.log("fusion/debug/theta_fused", Scalars(th_fus))
                 
-                
+                if "debug" in data and "raw_encoder_only" in data["debug"]:
+                    raw_pos = data["debug"]["raw_encoder_only"]
+                    # Usiamo un nome univoco per la scia raw
+                    if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
+                    
+                    main.traj_raw_enc.append(raw_pos)
+                    #if len(main.traj_raw_enc) > 6000: main.traj_raw_enc.pop(0)
+                    
+                    rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
+                    rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
 
                 """
                 # Ground Truth Trajectory from HTC - GREEN
@@ -239,7 +257,7 @@ def main():
                 gyro_z = get_nested(data, "/message/gyro/2")
                 if gyro_z is not None:
                     try:
-                        rr.log("sensors/gyro_z", Scalars(gyro_z))
+                        rr.log("sensors/imu/gyro/z_inverted", Scalars(-gyro_z))
                     except:
                         pass
 
