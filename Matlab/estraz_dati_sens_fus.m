@@ -1,6 +1,6 @@
 %% --- 1. Caricamento Dati ---
 
-addpath("data");
+addpath("SensorFusion");
 
 % Specifica il nome dei tuoi file
 fileNameARUCO = 'SensorFusion.H_initial_walker_aruco.csv';
@@ -27,7 +27,6 @@ end
 %% --- 2. Preparazione e Pulizia Dati (Eliminazione Timestamps Duplicati) ---
 
 % Funzione utility per aggregare i dati (calcola la media per i duplicati)
-% groupsummary è l'opzione più semplice, ma usiamo la logica manuale vista prima per massima compatibilità.
 aggregate_by_time = @(T_FULL, DataCols) deal(T_FULL, DataCols); % Dummy declaration
 
 % --- Pulizia ENCODERS (Definizione del Master Time Base) ---
@@ -47,8 +46,6 @@ end
 Tempo_Synched = T_ENC_UNIQUE; 
 encoder_left_V = AggregatedData_ENC(:, 1);
 encoder_right_V = AggregatedData_ENC(:, 2);
-
-%disp('Sincronizzazione basata sul tempo degli Encoders (dati puliti).');
 
 
 % --- Pulizia ARUCO ---
@@ -183,7 +180,7 @@ end
 %% 1. Costruzione della Matrice di Trasformazione T (Costante)
 
 % Rotazioni
-alpha = pi/2; % Z (Yaw)
+alpha = - pi/2; % Z (Yaw)
 beta = pi;    % X (Roll)
 
 Rz = [cos(alpha), -sin(alpha), 0; sin(alpha),  cos(alpha), 0; 0, 0, 1];  
@@ -199,11 +196,8 @@ p = [Tx_m; Ty_m; Tz_m];
 % Matrice T (4x4)
 T = [R, p; 0, 0, 0, 1];
 
-% Calcoliamo l'inversa di T una volta sola (per efficienza)
+% Calcolo inversa di T 
 T_inv = inv(T);
-
-% disp('Matrice T costruita:');
-% disp(T);
 
 
 %% 2. Loop di Trasformazione sui Dati IMU
@@ -223,12 +217,11 @@ N = length(Om_x);
 Om_Fixed = zeros(N, 3);
 Acc_Fixed = zeros(N, 3);
 
-% disp('Inizio elaborazione matriciale W e H per ogni step...');
 
 for k = 1:N
     % --- 1. Costruzione Matrice W (Velocità Angolare) ---
     % W contiene la Skew Matrix di Omega nella parte rotazionale (3x3)
-    % e zeri nella parte traslazionale (assumiamo vel lineare non nota o separata)
+    % e zeri nella parte traslazionale 
     
     w_vec = [Om_x(k); Om_y(k); Om_z(k)];
     
@@ -243,7 +236,7 @@ for k = 1:N
          
     % --- 2. Costruzione Matrice H (Accelerazione Lineare) ---
     % H contiene l'accelerazione nella parte Traslazionale (colonna 4)
-    % e zeri nella parte rotazionale (assumiamo acc angolare non nota)
+    % e zeri nella parte rotazionale 
     
     a_vec = [Acc_x(k); Acc_y(k); Acc_z(k)];
     
@@ -259,26 +252,25 @@ for k = 1:N
     
     % --- 4. Estrazione dei Vettori Trasformati ---
     
-    % Estrai Omega dal skew block di W_fixed_mat (o con unskew)
+    % Estraz Omega dal skew block di W_fixed_mat
     % W_fixed_mat(3,2) è omega_x, W_fixed_mat(1,3) è omega_y, etc.
-    % Usiamo la funzione unskew manuale per sicurezza:
     omega_new = [W_fixed_mat(3,2); W_fixed_mat(1,3); W_fixed_mat(2,1)];
     
-    % Estrai Accel dalla parte traslazionale di H_fixed_mat (prime 3 righe, col 4)
+    % Estraz Accel dalla parte traslazionale di H_fixed_mat (prime 3 righe, col 4)
     acc_new = H_fixed_mat(1:3, 4);
     
-    % Salva nei vettori risultato
+    % Salvo nei vettori risultato
     Om_Fixed(k, :) = omega_new';
     Acc_Fixed(k, :) = acc_new';
 end
 
 %% 3. Aggiornamento Tabella
 
-% Rimuovi vecchie colonne
+% Rimuovo vecchie colonne
 T_synced(:, {'OmegaX_IMU [deg/s]', 'OmegaY_IMU [deg/s]', 'OmegaZ_IMU [deg/s]', ...
             'AccX_IMU [g]', 'AccY_IMU [g]', 'AccZ_IMU [g]'}) = [];
 
-% Inserisci nuove colonne
+% Inserisco nuove colonne
 T_synced.OmegaX_Fixed = Om_Fixed(:, 1);
 T_synced.OmegaY_Fixed = Om_Fixed(:, 2);
 T_synced.OmegaZ_Fixed = Om_Fixed(:, 3);
@@ -286,7 +278,7 @@ T_synced.AccX_Fixed = Acc_Fixed(:, 1);
 T_synced.AccY_Fixed = Acc_Fixed(:, 2);
 T_synced.AccZ_Fixed = Acc_Fixed(:, 3);
 
-% Rinomina
+% Rinomino
 T_synced.Properties.VariableNames{'OmegaX_Fixed'} = 'OmegaX_IMU_Fixed [deg/s]';
 T_synced.Properties.VariableNames{'OmegaY_Fixed'} = 'OmegaY_IMU_Fixed [deg/s]';
 T_synced.Properties.VariableNames{'OmegaZ_Fixed'} = 'OmegaZ_IMU_Fixed [deg/s]';
@@ -294,11 +286,5 @@ T_synced.Properties.VariableNames{'AccX_Fixed'} = 'AccX_IMU_Fixed [g]';
 T_synced.Properties.VariableNames{'AccY_Fixed'} = 'AccY_IMU_Fixed [g]';
 T_synced.Properties.VariableNames{'AccZ_Fixed'} = 'AccZ_IMU_Fixed [g]';
 
-% disp('Trasformazione completata usando matrici 4x4 (Skew/Trans) e formula T*M*inv(T).');
-
 T_synced
-% %% --- 5. Salvataggio della Tabella Sincronizzata ---
-% 
-% writetable(T_synced, 'T_synched_dati_finali_puliti.csv');
-% 
-% disp('Estrazione e sincronizzazione completate. T_synched_dati_finali_puliti.csv è stato salvato.');
+
