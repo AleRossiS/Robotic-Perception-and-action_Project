@@ -11,7 +11,7 @@ optsENC = detectImportOptions(fileNameENC);
 optsHTC.DataLines = 2; 
 optsENC.DataLines = 2;
 
-% Leggi i dati in una tabella
+% Leggo i dati in una tabella
 try
     dataTableENC   = readtable(fileNameENC, optsENC);
     dataTableHTC   = readtable(fileNameHTC, optsHTC);
