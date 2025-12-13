@@ -172,7 +172,7 @@ def main():
                     if th_imu is not None: rr.log("fusion/debug/theta_imu", Scalars(th_imu))
                     #if th_fus is not None: rr.log("fusion/debug/theta_fused", Scalars(th_fus))
                 
-                if "debug" in data and "raw_encoder_only" in data["debug"]:
+                    # Posizion from raw encoders only            
                     raw_pos = data["debug"]["raw_encoder_only"]
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
@@ -182,6 +182,14 @@ def main():
                     
                     rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
                     rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
+
+                    # Acceleration from enc vs imu
+                    acc_enc = data["debug"].get("accel_enc")
+                    acc_imu = data["debug"].get("accel_imu")
+                    is_slipping = data["debug"].get("is_slipping")
+                    if acc_enc is not None: rr.log("debug/slip/accel_encoder", Scalars(acc_enc))
+                    if acc_imu is not None: rr.log("debug/slip/accel_imu", Scalars(acc_imu))
+                    if is_slipping is not None: rr.log("debug/slip/is_slipping_flag", Scalars(is_slipping))
 
                 """
                 # Ground Truth Trajectory from HTC - GREEN
