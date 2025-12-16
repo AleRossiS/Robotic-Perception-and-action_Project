@@ -183,6 +183,12 @@ def main():
                     rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
                     rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
 
+                    rs_center = data["debug"]["rs_center"]
+                    if not hasattr(main, "traj_rs_center"): main.traj_rs_center = []
+                    main.traj_rs_center.append([rs_center[0], rs_center[1], 0.0])
+                    rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01, labels="RS Center Path"))
+                    rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02))
+
                     # Acceleration from enc vs imu
                     acc_enc = data["debug"].get("accel_enc")
                     acc_imu = data["debug"].get("accel_imu")
@@ -190,6 +196,16 @@ def main():
                     if acc_enc is not None: rr.log("debug/slip/accel_encoder", Scalars(acc_enc))
                     if acc_imu is not None: rr.log("debug/slip/accel_imu", Scalars(acc_imu))
                     if is_slipping is not None: rr.log("debug/slip/is_slipping_flag", Scalars(is_slipping))
+
+                    ang_rs_raw = get_nested(data, "/debug/angles/rs_raw")
+                    ang_rs_unwrapped = get_nested(data, "/debug/angles/rs_unwrapped")
+                    ang_fused = get_nested(data, "/debug/angles/fused")
+                    ang_enc_only = get_nested(data, "/debug/angles/enc_only")
+
+                    if ang_rs_raw is not None: rr.log("debug/angles/rs_raw", Scalars(ang_rs_raw))
+                    if ang_rs_unwrapped is not None: rr.log("debug/angles/rs_unwrapped", Scalars(ang_rs_unwrapped))
+                    if ang_fused is not None: rr.log("debug/angles/fused", Scalars(ang_fused))
+                    if ang_enc_only is not None: rr.log("debug/angles/enc_only", Scalars(ang_enc_only))
 
                 """
                 # Ground Truth Trajectory from HTC - GREEN
@@ -211,18 +227,16 @@ def main():
             elif topic == "pose_rs_source":
                 # Leggi posizione RealSense
                 rs_x = get_nested(data, "/message/pose/position/0/0")
-                rs_y = get_nested(data, "/message/pose/position/0/1")
+                rs_y = - get_nested(data, "/message/pose/position/0/1")
                 
                 if rs_x is None: # Fallback formato piatto
                     rs_x = get_nested(data, "/message/pose/position/0")
-                    rs_y = get_nested(data, "/message/pose/position/1")
+                    rs_y = - get_nested(data, "/message/pose/position/1")
 
                 if rs_x is not None:
                     # A. Dato Grezzo (Come arriva dal sensore)
                     traj_rs.append([rs_x, rs_y, 0.0])
                     #if len(traj_rs) > 5000: traj_rs.pop(0)
-                    # Disegna Raw (Rosso - Errato)
-                    rr.log("geometry/realsense_raw", rr.LineStrips3D([traj_rs], colors=[[255, 0, 0]], labels="RS Raw"))
 
                     # B. Dato Allineato (Ruotato di 135 gradi)
                     # Applichiamo la rotazione al punto
@@ -236,7 +250,7 @@ def main():
                     #if len(traj_rs_aligned) > 5000: traj_rs_aligned.pop(0)
                     
                     # Disegna Allineato (Verde - Corretto?)
-                    rr.log("geometry/realsense_aligned", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 0]], labels=f"RS Rotated {math.degrees(RS_YAW_OFFSET):.0f}°"))
+                    rr.log("geometry/realsense", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 0]], labels=f"Aruco"))
                     
                 
 

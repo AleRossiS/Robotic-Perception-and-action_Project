@@ -122,16 +122,22 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
         double static_thresh = 0.05;    // Soglia per considerare ferm
         bool enable_slip_check = true;
-        double slip_accel_ratio = 5.0;   // Rapporto accel a_enc / a_imu
+        double slip_accel_ratio = 1.5;   // Rapporto accel a_enc / a_imu
 
         int filter_window_rs = 10;
         int filter_window_imu = 5;  
         int filter_window_acc = 10; // Finestra per accelerometro    
 
-        double rs_global_rotation = 0.0;
-        double cam_offset_x = 0.0;
+        double rs_global_rotation = 3.14;
+        double cam_offset_x = 0.80;
         double cam_offset_y = 0.0;
         bool invert_gyro = true;
+
+        // Parametri Offset IMU (Lever Arm) nel frame del Robot
+        double imu_offset_x = 0.70;
+        double imu_offset_y = 0.20;
+        double imu_offset_z = 0.00;
+        
     } _conf;
 
     // BUffer data:
@@ -150,10 +156,10 @@ class Odometry_filterPlugin : public Filter<json, json> {
     MovingAverage _filter_rs_theta;
 
     //MovingAverage _filter_enc_v; // Rimosso, uso filtro esponenziale inline
-    //MovingAverage _filter_enc_a; // Rimosso, uso filtro esponenziale inline
+    MovingAverage _filter_enc_a; // filtro ibrido per accelerazione encoder
 
     string _last_agent_id = "";
-    double _last_timestamp = 0.0;
+    double _last_timecode = 0.0;
     double _prev_time = 0.0;
 
     // IMU Data
@@ -168,6 +174,16 @@ class Odometry_filterPlugin : public Filter<json, json> {
     int _calibration_samples = 0;
     bool _bias_computed = false;
     const int CALIBRATION_LIMIT = 400;
+    
+    double _imu_accel_smooth_ema1 = 0.0;
+    double _imu_accel_smooth_ema2 = 0.0;
+
+    // Mem per calcolare derivata angolare
+    double _prev_gyro_x = 0.0;
+    double _prev_gyro_y = 0.0;
+    double _prev_gyro_z = 0.0;
+    double _prev_imu_timecode = 0.0;
+    bool _first_imu_frame = true;
 
     double _v_enc_smooth = 0.0;
     double _a_enc_smooth = 0.0;
@@ -202,22 +218,22 @@ public:
     _filter_rs_y(10), 
     _filter_rs_theta(10), 
     _filter_gyro(5), 
-    _filter_accel(10)//,
+    _filter_accel(15),
     //_filter_enc_v(10),
-    //_filter_enc_a(10)
+    _filter_enc_a(15)
     {}
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
 
-    // Timestamp
+    // Timecode
     double now = 0.0;
     if(in.contains("message") && in["message"].contains("timecode")){
         now = in["message"]["timecode"].get<double>();
     } else if (in.contains("/message/timecode")) {
         now = in["/message/timecode"].get<double>();
     }
-    if(now > 0) _last_timestamp = now;
+    if(now > 0) _last_timecode = now;
 
     // Encoders
     if (in.contains("/message/encoders/left") || (in.contains("message") && in["message"].contains("encoders"))) {
@@ -232,7 +248,7 @@ public:
         if (!_initialized) {
             _prev_ticks_l = _incoming_ticks_l;
             _prev_ticks_r = _incoming_ticks_r;
-            _prev_time = _last_timestamp;
+            _prev_time = _last_timecode;
             _initialized = true;
         } else {
             _has_new_encoder_data = true;
@@ -241,42 +257,113 @@ public:
     
     // --- 3. IMU (NUOVO FORMATO: Array Piatto) ---
     if (in.contains("message")){
+      //Variabili temporanee
+      double gx_body = 0.0, gy_body = 0.0, gz_body = 0.0;
+      double ax_body = 0.0, ay_body = 0.0, az_body = 0.0;
+      bool gyro_ready = false;
+      bool accel_ready = false;
+
       //Gyro
       if (in["message"].contains("gyro")) {
         auto& gyro = in["message"]["gyro"];
         if (gyro.is_array() && gyro.size() >= 3) {
-          double raw_gyro = gyro[2].get<double>();
-          if (_conf.invert_gyro) raw_gyro = -raw_gyro;
-          _current_gyro_z = _filter_gyro.update(raw_gyro);
-          _has_gyro = true; 
+          double raw_gx = gyro[0].get<double>();
+          double raw_gy = gyro[1].get<double>();
+          double raw_gz = gyro[2].get<double>();
+          
+          // Applicazione matrice di rotazione R = Rx(180) * Rz(-90)
+          // X_new = y_old, Y_new = x_old, Z_new = -z_old
+          gx_body = raw_gy;
+          gy_body = raw_gx;
+          gz_body = -raw_gz;
+
+          gyro_ready = true;
         }
       }
+
       // Accel
       if (in["message"].contains("accel")) {
         auto& accel = in["message"]["accel"];
         if (accel.is_array() && accel.size() >= 1) {
-          double raw_accel_g = accel[0].get<double>();
-          double raw_accel = raw_accel_g * 9.80665;
+          double raw_ax = accel[0].get<double>() * 9.80665;
+          double raw_ay = accel[1].get<double>() * 9.80665;
+          double raw_az = accel[2].get<double>() * 9.80665;
+          
+          ax_body = raw_ay;
+          ay_body = raw_ax;
+          az_body = -raw_az;
 
-          if (!_bias_computed) {
-            // 1. CALIBRAZIONE BIAS
-            if (_calibration_samples < CALIBRATION_LIMIT) {
-              _bias_accel_x += raw_accel;
+          accel_ready = true;
+        }
+      }
+
+      if (gyro_ready && accel_ready) {
+
+        double dt_imu = now - _prev_imu_timecode;
+        if(dt_imu <= 0.0) dt_imu = 1e-6; // Prevenzione divisione per zero
+
+        if(!_first_imu_frame){
+          // Calcolo Accelerazione Angolare (Alpha = dOmega/dt)
+          double alpha_x = (gx_body - _prev_gyro_x) / dt_imu;
+          double alpha_y = (gy_body - _prev_gyro_y) / dt_imu;
+          double alpha_z = (gz_body - _prev_gyro_z) / dt_imu;
+
+          // Vettore Offset (lever arm)
+          double rx = _conf.imu_offset_x;
+          double ry = _conf.imu_offset_y;
+          double rz = _conf.imu_offset_z;
+
+          // Termine tangenziale (Alpha x R)
+          double tan_x = alpha_y * rz - gz_body * ry;
+          double tan_y = gz_body * rx - alpha_x * rz;
+          double tan_z = alpha_x * ry - alpha_y * rx;
+
+          // Termine centripeto (Omega x (Omega x R))
+          // Omega x R
+          double oxr_x = gy_body * rz - gz_body * ry;
+          double oxr_y = gz_body * rx - gx_body * rz;
+          double oxr_z = gx_body * ry - gy_body * rx;
+          // Omega x (Omega x R)
+          double cent_x = gy_body * oxr_z - gz_body * oxr_y;
+          double cent_y = gz_body * oxr_x - gx_body * oxr_z;
+          double cent_z = gx_body * oxr_y - gy_body * oxr_x;
+          
+          // Correzione finale
+          // a_body = a_measured - a_tangential - a_centripetal
+          double ax_corrected = ax_body - tan_x - cent_x;
+
+          // Aggiorna filtro
+          double val_gyro_z = _conf.invert_gyro ? -gz_body : gz_body;
+          _current_gyro_z = _filter_gyro.update(val_gyro_z);
+
+          // Accelerometro X
+          if(!_bias_computed){
+            if(_calibration_samples < CALIBRATION_LIMIT){
+              _bias_accel_x += ax_corrected;
               _calibration_samples++;
               _current_accel_x = 0.0;
             } else {
               _bias_accel_x /= (double)CALIBRATION_LIMIT;
               _bias_computed = true;
-              std::cout << "IMU Calibrated. Bias X: " << _bias_accel_x << std::endl;
+              std::cout << "IMU Calibrated with lever arm. Bias X: " << _bias_accel_x << std::endl;
             }
           } else {
-            // 2. RIMOZIONE BIAS
-            double clean_accel = raw_accel - _bias_accel_x;
-          _current_accel_x = _filter_accel.update(clean_accel);
+            double clean_accel = ax_corrected - _bias_accel_x;
+            _current_accel_x = _filter_accel.update(clean_accel);
         }
+
+
+      }
+      // aggiorna storico per la derivata
+        _prev_gyro_x = gx_body;
+        _prev_gyro_y = gy_body;
+        _prev_gyro_z = gz_body;
+        _prev_imu_timecode = now;
+        _first_imu_frame = false;
+        _has_gyro = true;
+        _has_imu = true;
       }   
     }
-  }
 
     // RealSense
     double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
@@ -294,42 +381,69 @@ public:
           raw_rs_x = p["position"][0].get<double>();
           raw_rs_y = p["position"][1].get<double>();
         }
+
+        // Angle (Handle nested arrays)
+      if (p.contains("attitude")) {
+        if(p["attitude"][0].is_array()){
+        raw_rs_theta = p["attitude"][0][2].get<double>();
+        } else {
+        raw_rs_theta = p["attitude"][2].get<double>();
+        //else raw_rs_theta = att.get<double>(); // If scalar
+        }
+      }
         rs_found = true;
       }
       
       
-      // Angle (Handle nested arrays)
-      if (p.contains("attitude_along_z")) {
-        auto& att = p["attitude_along_z"];
-        if (att.is_array()) raw_rs_theta = att[0].get<double>(); // If array
-        else raw_rs_theta = att.get<double>(); // If scalar
-      }
+      
     }
 
-    // Anti-freeze check & filtering
-    if (rs_found && (abs(raw_rs_x) > 0.001 || abs(raw_rs_y) > 0.001)) {
 
-      //Specchio
-        double rot = _conf.rs_global_rotation;
-        double x_new = -(raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
-        double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
-        raw_rs_x = x_new;
-        raw_rs_y = y_new;
-        raw_rs_theta += rot;
+    // Anti-freeze check & filtering
+    if (rs_found) {
+
+      // Sistema sinistrorso
+      raw_rs_y = -raw_rs_y;
+      raw_rs_theta = -raw_rs_theta;
+
+      double rot = _conf.rs_global_rotation;
+      double x_new = (raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
+      double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
+
+      raw_rs_x = x_new;
+      raw_rs_y = y_new;
+      raw_rs_theta += rot;
+
+       if(_first_rs_frame){
+      _rs_theta_unwrapped = raw_rs_theta;
+      _prev_rs_theta_raw = raw_rs_theta;
+      _first_rs_frame = false;
+      }
+
+      double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
+
+      while (delta_theta_rs > M_PI) delta_theta_rs -= 2.0 * M_PI;
+      while (delta_theta_rs < -M_PI) delta_theta_rs += 2.0 * M_PI; 
+
+      _rs_theta_unwrapped += delta_theta_rs;
+      _prev_rs_theta_raw = raw_rs_theta;
       
 
       double dist = sqrt(pow(raw_rs_x - _prev_raw_rs_x, 2) + pow(raw_rs_y - _prev_raw_rs_y, 2));
-      if (dist > 0.0001) { // Not stuck
-                _rs_x = _filter_rs_x.update(raw_rs_x);
-                _rs_y = _filter_rs_y.update(raw_rs_y);
-                _rs_theta = _filter_rs_theta.update(raw_rs_theta);
-                
-                _has_rs_update = true;
+      if (dist > 0.0001 || abs(delta_theta_rs) > 0.001) { // Not stuck
+        _rs_x = _filter_rs_x.update(raw_rs_x);
+        _rs_y = _filter_rs_y.update(raw_rs_y);
 
-                _prev_raw_rs_x = raw_rs_x;
-                _prev_raw_rs_y = raw_rs_y;
-            }
-          }
+        double filtered_unwrapped = _filter_rs_theta.update(_rs_theta_unwrapped);
+        _rs_theta = filtered_unwrapped;
+        while (_rs_theta > M_PI) _rs_theta -= 2.0 * M_PI;
+        while (_rs_theta < -M_PI) _rs_theta += 2.0 * M_PI;
+                
+        _has_rs_update = true;
+        _prev_raw_rs_x = raw_rs_x;
+        _prev_raw_rs_y = raw_rs_y;
+      }
+    }
 
     if (in.contains("agent_id")) _last_agent_id = in["agent_id"].get<string>();
 
@@ -348,7 +462,7 @@ public:
             return return_type::success; // O warning,
         }
 
-        double current_dt = _last_timestamp - _prev_time;
+        double current_dt = _last_timecode - _prev_time;
         if(current_dt <= 0.01) return return_type::success; // Evita calcoli inutili
 
         long d_ticks_l = _incoming_ticks_l - _prev_ticks_l;
@@ -359,7 +473,7 @@ public:
 
         double dt = current_dt;
         if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
-        _prev_time = _last_timestamp;
+        _prev_time = _last_timecode;
 
         // --- PREDICTION (Usa Gyroscope!) ---
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
@@ -373,44 +487,38 @@ public:
         //_v_enc_smooth = _filter_enc_v.update(v_enc_raw); //Moving average logic
 
 
-        double alpha_v = 0.05;
+        double alpha_v = 0.10;
         _v_enc_smooth = (alpha_v * v_enc_raw) + ((1.0 - alpha_v) * _v_enc_smooth); // Low pass filter exponential
 
         double a_enc_raw = (_v_enc_smooth - _prev_v_enc) / dt;
         //_a_enc_smooth = _filter_enc_a.update(a_enc_raw); //Moving average logic 
+        
 
-        double alpha_a = 0.1;
+        double alpha_a = 0.20;
         _a_enc_smooth = (alpha_a * a_enc_raw) + ((1.0 - alpha_a) * _a_enc_smooth); // Low pass filter exponential
+        double a_enc_sma = _filter_enc_a.update(_a_enc_smooth); // Moving average filter
 
-        if (_a_enc_smooth > 20.0) _a_enc_smooth = 20.0;
-        if (_a_enc_smooth < -20.0) _a_enc_smooth = -20.0;
+        // manipolazione valori imu per inserire ritardo artificiale simile a encoder
+        _imu_accel_smooth_ema1 = (alpha_v * _current_accel_x) + ((1.0 - alpha_v) * _imu_accel_smooth_ema1);
+        _imu_accel_smooth_ema2 = (alpha_a * _imu_accel_smooth_ema1) + ((1.0 - alpha_a) * _imu_accel_smooth_ema2);
+        double a_imu_final = _imu_accel_smooth_ema2;
 
         _prev_v_enc = _v_enc_smooth;
 
 
         bool is_slipping = false;
 
-        double min_imu_accel_for_correction = 0.2;
+        double min_imu_accel_for_correction = 0.05;
 
         if(_conf.enable_slip_check && _bias_computed){
-            // 1. ZUPT (Zero Velocity Update)
-            // Se l'IMU dice che l'accelerazione è NULLA e il Gyro è fermo...
-            // ...ma gli encoder segnano movimento -> Slittamento da fermo!
-          if (abs(_current_accel_x) < _conf.static_thresh && abs(_current_gyro_z) < 0.01){
-              if(abs(_v_enc_smooth) > 0.05){}
-                is_slipping = true;
-                ds = 0.0; // FORZA FERMO
-          }
-        
             // 2. Acceleration Mismatch (Burnout Check)
             // Se gli encoder dicono "Partenza a razzo" (alta accel)
             // Ma l'IMU dice "Movimento blando"
-          else if (abs(_a_enc_smooth) > abs(_current_accel_x) * _conf.slip_accel_ratio && abs(_current_accel_x) > min_imu_accel_for_correction) {
+          if (abs(a_enc_sma) > abs(a_imu_final) && abs(a_imu_final) > min_imu_accel_for_correction) {
             is_slipping = true; // Rilevato slip
-            double ratio = abs(_a_enc_smooth) / abs(_current_accel_x);
+            double ratio = abs(a_enc_sma) / abs(a_imu_final);
 
-            if(ratio > 10) ratio = 10.0; // Limite massimo
-            if(ratio < 1.0) ratio = 1.0; // Sicurezza
+            //if(ratio > 10) ratio = 10.0; // Limite massimo
 
             ds = ds / ratio;
 
@@ -418,8 +526,8 @@ public:
           
         }
 
-        _debug_slip.enc_accel = _a_enc_smooth;
-        _debug_slip.imu_accel = _current_accel_x;
+        _debug_slip.enc_accel = a_enc_sma;
+        _debug_slip.imu_accel = a_imu_final;
         _debug_slip.is_slipping = is_slipping;
 
         
@@ -526,9 +634,21 @@ public:
         out["debug"]["accel_enc"] = _debug_slip.enc_accel;
         out["debug"]["accel_imu"] = _debug_slip.imu_accel;
         out["debug"]["is_slipping"] = _debug_slip.is_slipping ? 1.0 : 0.0;
+
+        out["debug"]["angles"]["rs_raw"] = _prev_rs_theta_raw;
+        out["debug"]["angles"]["rs_unwrapped"] = _rs_theta_unwrapped;
+        out["debug"]["angles"]["fused"] = _state.theta;
+        out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;
+
+        double theta_rs = _rs_theta_unwrapped;
+
+        double rs_robot_x = _rs_x - (cos(theta_rs) * _conf.cam_offset_x - sin(theta_rs) * _conf.cam_offset_y);
+        double rs_robot_y = _rs_y - (sin(theta_rs) * _conf.cam_offset_x + cos(theta_rs) * _conf.cam_offset_y);
+
+        out["debug"]["rs_center"] = std::vector<double>{rs_robot_x, rs_robot_y, 0.0};
         
         if (!_last_agent_id.empty()) out["source_id"] = _last_agent_id;
-        out["sim_time"] = _last_timestamp;
+        out["sim_time"] = _last_timecode;
 
         return return_type::success;
     }
@@ -586,6 +706,10 @@ public:
     _initialized = false;
     _prev_raw_rs_x = -9999.0;
     _prev_raw_rs_y = -9999.0;
+
+    _first_rs_frame = true;
+    _rs_theta_unwrapped = 0.0;
+    _prev_rs_theta_raw = 0.0;
       
   }
 /*
@@ -602,6 +726,9 @@ public:
 private:
 
   // Define the fields that are used to store internal resources
+  double _prev_rs_theta_raw = 0.0;
+  double _rs_theta_unwrapped = 0.0;
+  bool _first_rs_frame = true;
   
 };
 
