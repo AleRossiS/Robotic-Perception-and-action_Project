@@ -122,6 +122,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
         double static_thresh = 0.05;    // Soglia per considerare ferm
         bool enable_slip_check = true;
+        double slip_accel_ratio = 5.0;   // Rapporto accel a_enc / a_imu
 
         int filter_window_rs = 10;
         int filter_window_imu = 5;  
@@ -148,6 +149,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
     MovingAverage _filter_rs_y;
     MovingAverage _filter_rs_theta;
 
+    //MovingAverage _filter_enc_v; // Rimosso, uso filtro esponenziale inline
+    //MovingAverage _filter_enc_a; // Rimosso, uso filtro esponenziale inline
+
     string _last_agent_id = "";
     double _last_timestamp = 0.0;
     double _prev_time = 0.0;
@@ -159,6 +163,14 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _current_accel_x = 0.0;
     bool _has_gyro = false;
     bool _has_imu = false;
+
+    double _bias_accel_x = 0.0;
+    int _calibration_samples = 0;
+    bool _bias_computed = false;
+    const int CALIBRATION_LIMIT = 400;
+
+    double _v_enc_smooth = 0.0;
+    double _a_enc_smooth = 0.0;
 
     double _prev_v_enc = 0.0; // Velocità precedente (per calcolo accel)
 
@@ -185,7 +197,15 @@ public:
         };
   }
 
-  Odometry_filterPlugin() : _filter_rs_x(10), _filter_rs_y(10), _filter_rs_theta(10), _filter_gyro(5), _filter_accel(10) {}
+  Odometry_filterPlugin() : 
+    _filter_rs_x(10), 
+    _filter_rs_y(10), 
+    _filter_rs_theta(10), 
+    _filter_gyro(5), 
+    _filter_accel(10)//,
+    //_filter_enc_v(10),
+    //_filter_enc_a(10)
+    {}
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
@@ -235,11 +255,28 @@ public:
       if (in["message"].contains("accel")) {
         auto& accel = in["message"]["accel"];
         if (accel.is_array() && accel.size() >= 1) {
-          double raw_accel = accel[0].get<double>();
-          _current_accel_x = _filter_accel.update(raw_accel);
+          double raw_accel_g = accel[0].get<double>();
+          double raw_accel = raw_accel_g * 9.80665;
+
+          if (!_bias_computed) {
+            // 1. CALIBRAZIONE BIAS
+            if (_calibration_samples < CALIBRATION_LIMIT) {
+              _bias_accel_x += raw_accel;
+              _calibration_samples++;
+              _current_accel_x = 0.0;
+            } else {
+              _bias_accel_x /= (double)CALIBRATION_LIMIT;
+              _bias_computed = true;
+              std::cout << "IMU Calibrated. Bias X: " << _bias_accel_x << std::endl;
+            }
+          } else {
+            // 2. RIMOZIONE BIAS
+            double clean_accel = raw_accel - _bias_accel_x;
+          _current_accel_x = _filter_accel.update(clean_accel);
         }
       }   
     }
+  }
 
     // RealSense
     double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
@@ -311,50 +348,77 @@ public:
             return return_type::success; // O warning,
         }
 
+        double current_dt = _last_timestamp - _prev_time;
+        if(current_dt <= 0.01) return return_type::success; // Evita calcoli inutili
+
         long d_ticks_l = _incoming_ticks_l - _prev_ticks_l;
         long d_ticks_r = _incoming_ticks_r - _prev_ticks_r;
         _prev_ticks_l = _incoming_ticks_l;
         _prev_ticks_r = _incoming_ticks_r;
         _has_new_encoder_data = false;
 
-        double dt = _last_timestamp - _prev_time;
-        if (dt <= 0) dt = 1e-6;
+        double dt = current_dt;
+        if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
         _prev_time = _last_timestamp;
 
         // --- PREDICTION (Usa Gyroscope!) ---
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
         double d_right = (d_ticks_r / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_right;
         double ds = (d_right + d_left) / 2.0;
+        double ds_only_enc = ds;
 
-        
         // calcolo velocità e accelerazione encoder
-        double v_enc = ds / dt;
-        double a_enc = (v_enc - _prev_v_enc) / dt;
-        _prev_v_enc = v_enc;
+        double v_enc_raw = ds / dt;
+
+        //_v_enc_smooth = _filter_enc_v.update(v_enc_raw); //Moving average logic
+
+
+        double alpha_v = 0.05;
+        _v_enc_smooth = (alpha_v * v_enc_raw) + ((1.0 - alpha_v) * _v_enc_smooth); // Low pass filter exponential
+
+        double a_enc_raw = (_v_enc_smooth - _prev_v_enc) / dt;
+        //_a_enc_smooth = _filter_enc_a.update(a_enc_raw); //Moving average logic 
+
+        double alpha_a = 0.1;
+        _a_enc_smooth = (alpha_a * a_enc_raw) + ((1.0 - alpha_a) * _a_enc_smooth); // Low pass filter exponential
+
+        if (_a_enc_smooth > 20.0) _a_enc_smooth = 20.0;
+        if (_a_enc_smooth < -20.0) _a_enc_smooth = -20.0;
+
+        _prev_v_enc = _v_enc_smooth;
+
 
         bool is_slipping = false;
 
-        if(_conf.enable_slip_check){
+        double min_imu_accel_for_correction = 0.2;
+
+        if(_conf.enable_slip_check && _bias_computed){
             // 1. ZUPT (Zero Velocity Update)
             // Se l'IMU dice che l'accelerazione è NULLA e il Gyro è fermo...
             // ...ma gli encoder segnano movimento -> Slittamento da fermo!
-            if (abs(_current_accel_x) < _conf.static_thresh && abs(_current_gyro_z) < 0.01) {
-              if(abs(v_enc) > 0.001){
+          if (abs(_current_accel_x) < _conf.static_thresh && abs(_current_gyro_z) < 0.01){
+              if(abs(_v_enc_smooth) > 0.05){}
                 is_slipping = true;
                 ds = 0.0; // FORZA FERMO
-            } 
           }
+        
             // 2. Acceleration Mismatch (Burnout Check)
             // Se gli encoder dicono "Partenza a razzo" (alta accel)
             // Ma l'IMU dice "Movimento blando"
-            else if (abs(a_enc) > 0.5 && abs(_current_accel_x) < _conf.slip_accel_thresh) {
-                    is_slipping = true; // Rilevato slip
-                    ds *= 0.1;
-                }
+          else if (abs(_a_enc_smooth) > abs(_current_accel_x) * _conf.slip_accel_ratio && abs(_current_accel_x) > min_imu_accel_for_correction) {
+            is_slipping = true; // Rilevato slip
+            double ratio = abs(_a_enc_smooth) / abs(_current_accel_x);
+
+            if(ratio > 10) ratio = 10.0; // Limite massimo
+            if(ratio < 1.0) ratio = 1.0; // Sicurezza
+
+            ds = ds / ratio;
+
+          }
           
         }
 
-        _debug_slip.enc_accel = a_enc;
+        _debug_slip.enc_accel = _a_enc_smooth;
         _debug_slip.imu_accel = _current_accel_x;
         _debug_slip.is_slipping = is_slipping;
 
@@ -369,8 +433,8 @@ public:
 
         // Update raw encoder only state
         double avg_theta_enc = _state_enc_only.theta + d_theta_enc / 2.0;
-        _state_enc_only.x += ds * cos(avg_theta_enc);
-        _state_enc_only.y += ds * sin(avg_theta_enc);
+        _state_enc_only.x += ds_only_enc * cos(avg_theta_enc);
+        _state_enc_only.y += ds_only_enc * sin(avg_theta_enc);
         _state_enc_only.theta += d_theta_enc;
 
 
@@ -511,6 +575,7 @@ public:
     if (p.contains("slip_accel_thresh")) _conf.slip_accel_thresh = p["slip_accel_thresh"];
     if (p.contains("static_thresh")) _conf.static_thresh = p["static_thresh"];
     if (p.contains("enable_slip_check")) _conf.enable_slip_check = p["enable_slip_check"];
+    if(p.contains("slip_accel_ratio")) _conf.slip_accel_ratio = p["slip_accel_ratio"];
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
