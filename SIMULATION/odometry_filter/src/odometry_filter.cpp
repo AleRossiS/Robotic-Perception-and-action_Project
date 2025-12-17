@@ -55,6 +55,8 @@ public:
     
     void resize(size_t new_size) { _size = new_size; _window.clear(); _sum = 0.0; }
 
+    void clear() { _window.clear(); _sum = 0.0; }
+
     double update(double val) {
         _window.push_back(val);
         _sum += val;
@@ -128,7 +130,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
         int filter_window_imu = 5;  
         int filter_window_acc = 10; // Finestra per accelerometro    
 
-        double rs_global_rotation = 3.14;
+        double rs_global_rotation = 0.0;
         double cam_offset_x = 0.80;
         double cam_offset_y = 0.0;
         bool invert_gyro = true;
@@ -402,48 +404,63 @@ public:
     // Anti-freeze check & filtering
     if (rs_found) {
 
+      double delta_input = raw_rs_theta - _last_input_rs_theta;
+
+      _last_input_rs_theta = raw_rs_theta;
+
+      if(abs(delta_input) < 1e-6){
+        _aruco_frozen_counter++;
+      } else {
+        if(_aruco_frozen_counter > 5 || abs(delta_input) > M_PI){
+        _filter_rs_x.clear();
+        _filter_rs_y.clear();
+        _filter_rs_theta.clear();
+
+        //std::cout << "Aruco Unfrozen (Static frames: " << _aruco_frozen_counter << "). Filters reset." << std::endl;
+        
+      }
+      _aruco_frozen_counter = 0;
+    
+
       // Sistema sinistrorso
-      raw_rs_y = -raw_rs_y;
-      raw_rs_theta = -raw_rs_theta;
+      //raw_rs_y = -raw_rs_y;
+      //raw_rs_x = -raw_rs_x;
+      //raw_rs_theta = -raw_rs_theta;
 
       double rot = _conf.rs_global_rotation;
       double x_new = (raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
       double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
+      //double theta_new = raw_rs_theta + rot;
 
       raw_rs_x = x_new;
       raw_rs_y = y_new;
-      raw_rs_theta += rot;
+      //raw_rs_theta += rot;
 
-       if(_first_rs_frame){
-      _rs_theta_unwrapped = raw_rs_theta;
-      _prev_rs_theta_raw = raw_rs_theta;
-      _first_rs_frame = false;
-      }
+      //if(_first_rs_frame){
+      //_rs_theta_unwrapped = raw_rs_theta;
+      //_prev_rs_theta_raw = raw_rs_theta;
+      //_first_rs_frame = false;
+      //}
 
-      double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
+      //double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
 
-      while (delta_theta_rs > M_PI) delta_theta_rs -= 2.0 * M_PI;
-      while (delta_theta_rs < -M_PI) delta_theta_rs += 2.0 * M_PI; 
-
+      double delta_theta_rs = atan2(sin(raw_rs_theta - _prev_rs_theta_raw), cos(raw_rs_theta - _prev_rs_theta_raw));
       _rs_theta_unwrapped += delta_theta_rs;
+
+      //_rs_theta_unwrapped += delta_theta_rs;
       _prev_rs_theta_raw = raw_rs_theta;
+    
+      _rs_x = _filter_rs_x.update(raw_rs_x);
+      _rs_y = _filter_rs_y.update(raw_rs_y);
+      _rs_theta = _filter_rs_theta.update(raw_rs_theta);
       
-
-      double dist = sqrt(pow(raw_rs_x - _prev_raw_rs_x, 2) + pow(raw_rs_y - _prev_raw_rs_y, 2));
-      if (dist > 0.0001 || abs(delta_theta_rs) > 0.001) { // Not stuck
-        _rs_x = _filter_rs_x.update(raw_rs_x);
-        _rs_y = _filter_rs_y.update(raw_rs_y);
-
-        double filtered_unwrapped = _filter_rs_theta.update(_rs_theta_unwrapped);
-        _rs_theta = filtered_unwrapped;
-        while (_rs_theta > M_PI) _rs_theta -= 2.0 * M_PI;
-        while (_rs_theta < -M_PI) _rs_theta += 2.0 * M_PI;
                 
-        _has_rs_update = true;
-        _prev_raw_rs_x = raw_rs_x;
-        _prev_raw_rs_y = raw_rs_y;
+      _has_rs_update = true;
+      _prev_raw_rs_x = raw_rs_x;
+      _prev_raw_rs_y = raw_rs_y;
       }
     }
+  
 
     if (in.contains("agent_id")) _last_agent_id = in["agent_id"].get<string>();
 
@@ -636,14 +653,14 @@ public:
         out["debug"]["is_slipping"] = _debug_slip.is_slipping ? 1.0 : 0.0;
 
         out["debug"]["angles"]["rs_raw"] = _prev_rs_theta_raw;
-        out["debug"]["angles"]["rs_unwrapped"] = _rs_theta_unwrapped;
+        out["debug"]["angles"]["rs_unwrapped"] = _rs_theta;
         out["debug"]["angles"]["fused"] = _state.theta;
         out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;
 
-        double theta_rs = _rs_theta_unwrapped;
+        //double theta_rs = _rs_theta_unwrapped;
 
-        double rs_robot_x = _rs_x - (cos(theta_rs) * _conf.cam_offset_x - sin(theta_rs) * _conf.cam_offset_y);
-        double rs_robot_y = _rs_y - (sin(theta_rs) * _conf.cam_offset_x + cos(theta_rs) * _conf.cam_offset_y);
+        double rs_robot_x = _rs_x - (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y);
+        double rs_robot_y = _rs_y - (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y);
 
         out["debug"]["rs_center"] = std::vector<double>{rs_robot_x, rs_robot_y, 0.0};
         
@@ -729,6 +746,15 @@ private:
   double _prev_rs_theta_raw = 0.0;
   double _rs_theta_unwrapped = 0.0;
   bool _first_rs_frame = true;
+
+  double _last_input_rs_x = 0.0;
+  double _last_input_rs_y = 0.0;
+  double _last_input_rs_theta = 0.0;
+  int _aruco_frozen_counter = 0;
+
+ //double raw_rs_theta = 0.0;
+
+
   
 };
 
