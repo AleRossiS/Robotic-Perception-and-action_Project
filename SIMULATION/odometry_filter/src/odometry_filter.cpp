@@ -196,6 +196,8 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _prev_raw_rs_x = -9999.0;
     double _prev_raw_rs_y = -9999.0;
 
+    double _ekf_theta_rs = 0.0;
+
     // Correction data RealSense
     double _rs_x = 0.0;
     double _rs_y = 0.0;
@@ -220,9 +222,9 @@ public:
     _filter_rs_y(10), 
     _filter_rs_theta(10), 
     _filter_gyro(5), 
-    _filter_accel(15),
+    _filter_accel(5),
     //_filter_enc_v(10),
-    _filter_enc_a(15)
+    _filter_enc_a(5)
     {}
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
@@ -350,8 +352,8 @@ public:
               std::cout << "IMU Calibrated with lever arm. Bias X: " << _bias_accel_x << std::endl;
             }
           } else {
-            double clean_accel = ax_corrected - _bias_accel_x;
-            _current_accel_x = _filter_accel.update(clean_accel);
+            _current_accel_x = ax_corrected - _bias_accel_x;
+            
         }
 
 
@@ -404,22 +406,45 @@ public:
     // Anti-freeze check & filtering
     if (rs_found) {
 
+      
+
+
       double delta_input = raw_rs_theta - _last_input_rs_theta;
 
       _last_input_rs_theta = raw_rs_theta;
 
       if(abs(delta_input) < 1e-6){
-        _aruco_frozen_counter++;
-      } else {
-        if(_aruco_frozen_counter > 5 || abs(delta_input) > M_PI){
         _filter_rs_x.clear();
         _filter_rs_y.clear();
         _filter_rs_theta.clear();
-
-        //std::cout << "Aruco Unfrozen (Static frames: " << _aruco_frozen_counter << "). Filters reset." << std::endl;
+        _first_rs_frame = true;
+      } else {
         
-      }
-      _aruco_frozen_counter = 0;
+
+      // TEST
+
+      //double x_new = -raw_rs_x;
+      //double y_new = -raw_rs_y;
+      //double theta_new = raw_rs_theta;
+
+      double correction_rad = 0.0;
+      double total_angle = _conf.rs_global_rotation + correction_rad;
+      double cos_rs = cos(total_angle);
+      double sin_rs = sin(total_angle);
+
+      double x_new = (raw_rs_x * cos_rs - raw_rs_y * sin_rs);
+      double y_new = (raw_rs_x * sin_rs + raw_rs_y * cos_rs);
+
+      double theta_new = raw_rs_theta + total_angle;
+
+      while(theta_new > M_PI) theta_new -= 2.0 * M_PI;
+      while(theta_new < -M_PI) theta_new += 2.0 * M_PI;
+
+      //ipotesi ruotato 180°
+      //raw_rs_theta += M_PI;
+
+
+      //raw_rs_theta = theta_new;
     
 
       // Sistema sinistrorso
@@ -427,37 +452,45 @@ public:
       //raw_rs_x = -raw_rs_x;
       //raw_rs_theta = -raw_rs_theta;
 
-      double rot = _conf.rs_global_rotation;
-      double x_new = (raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
-      double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
+      //double rot = _conf.rs_global_rotation;
+      //double x_new = (raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
+      //double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
       //double theta_new = raw_rs_theta + rot;
 
-      raw_rs_x = x_new;
-      raw_rs_y = y_new;
+      //raw_rs_x = x_new;
+      //raw_rs_y = y_new;
       //raw_rs_theta += rot;
 
-      //if(_first_rs_frame){
-      //_rs_theta_unwrapped = raw_rs_theta;
-      //_prev_rs_theta_raw = raw_rs_theta;
-      //_first_rs_frame = false;
-      //}
+      if(_first_rs_frame){
+      _rs_theta_unwrapped = raw_rs_theta;
+      _prev_rs_theta_raw = raw_rs_theta;
+      _first_rs_frame = false;
+      }
 
       //double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
 
-      double delta_theta_rs = atan2(sin(raw_rs_theta - _prev_rs_theta_raw), cos(raw_rs_theta - _prev_rs_theta_raw));
-      _rs_theta_unwrapped += delta_theta_rs;
+      //double delta_theta_rs = atan2(sin(theta_new - _prev_rs_theta_raw), cos(theta_new - _prev_rs_theta_raw));
+      //_rs_theta_unwrapped += delta_theta_rs;
 
       //_rs_theta_unwrapped += delta_theta_rs;
-      _prev_rs_theta_raw = raw_rs_theta;
+      _prev_rs_theta_raw = theta_new;
+      //raw_rs_theta = raw_rs_theta;
+
+      _ekf_theta_rs = theta_new - M_PI;
+      while(_ekf_theta_rs > M_PI) _ekf_theta_rs -= 2.0 * M_PI;
+      while(_ekf_theta_rs < -M_PI) _ekf_theta_rs += 2.0 * M_PI;
     
-      _rs_x = _filter_rs_x.update(raw_rs_x);
-      _rs_y = _filter_rs_y.update(raw_rs_y);
-      _rs_theta = _filter_rs_theta.update(raw_rs_theta);
+      _rs_x = _filter_rs_x.update(x_new);
+      _rs_y = _filter_rs_y.update(y_new);
+      _rs_theta = _filter_rs_theta.update(theta_new);
+
+      while(_rs_theta > M_PI) _rs_theta -= 2.0 * M_PI;
+      while(_rs_theta < -M_PI) _rs_theta += 2.0 * M_PI;
       
                 
       _has_rs_update = true;
-      _prev_raw_rs_x = raw_rs_x;
-      _prev_raw_rs_y = raw_rs_y;
+      _prev_raw_rs_x = x_new;
+      _prev_raw_rs_y = y_new;
       }
     }
   
@@ -518,7 +551,9 @@ public:
         // manipolazione valori imu per inserire ritardo artificiale simile a encoder
         _imu_accel_smooth_ema1 = (alpha_v * _current_accel_x) + ((1.0 - alpha_v) * _imu_accel_smooth_ema1);
         _imu_accel_smooth_ema2 = (alpha_a * _imu_accel_smooth_ema1) + ((1.0 - alpha_a) * _imu_accel_smooth_ema2);
-        double a_imu_final = _imu_accel_smooth_ema2;
+        double a_imu_final = _filter_accel.update(_imu_accel_smooth_ema2);
+        //double a_imu_final= _imu_accel_smooth_ema2;
+        //double a_imu_final = _current_accel_x;
 
         _prev_v_enc = _v_enc_smooth;
 
@@ -536,6 +571,9 @@ public:
             double ratio = abs(a_enc_sma) / abs(a_imu_final);
 
             //if(ratio > 10) ratio = 10.0; // Limite massimo
+            
+            
+            //SE ACCELERAZIONE ~0 DS = PREV_DS
 
             ds = ds / ratio;
 
@@ -656,11 +694,12 @@ public:
         out["debug"]["angles"]["rs_unwrapped"] = _rs_theta;
         out["debug"]["angles"]["fused"] = _state.theta;
         out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;
+        out["debug"]["angles"]["ekf_rs"] = _ekf_theta_rs;
 
         //double theta_rs = _rs_theta_unwrapped;
 
-        double rs_robot_x = _rs_x - (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y);
-        double rs_robot_y = _rs_y - (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y);
+        double rs_robot_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
+        double rs_robot_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
 
         out["debug"]["rs_center"] = std::vector<double>{rs_robot_x, rs_robot_y, 0.0};
         
@@ -750,7 +789,9 @@ private:
   double _last_input_rs_x = 0.0;
   double _last_input_rs_y = 0.0;
   double _last_input_rs_theta = 0.0;
-  int _aruco_frozen_counter = 0;
+  double _last_valid_rs_time = 0.0;
+ 
+  
 
  //double raw_rs_theta = 0.0;
 

@@ -201,11 +201,13 @@ def main():
                     ang_rs_unwrapped = get_nested(data, "/debug/angles/rs_unwrapped")
                     ang_fused = get_nested(data, "/debug/angles/fused")
                     ang_enc_only = get_nested(data, "/debug/angles/enc_only")
+                    ang_ekf_rs = get_nested(data, "/debug/angles/ekf_rs")
 
                     if ang_rs_raw is not None: rr.log("debug/angles/rs_raw", Scalars(ang_rs_raw))
                     if ang_rs_unwrapped is not None: rr.log("debug/angles/rs_unwrapped", Scalars(ang_rs_unwrapped))
                     if ang_fused is not None: rr.log("debug/angles/fused", Scalars(ang_fused))
                     if ang_enc_only is not None: rr.log("debug/angles/enc_only", Scalars(ang_enc_only))
+                    if ang_ekf_rs is not None: rr.log("debug/angles/ekf_rs", Scalars(ang_ekf_rs))
 
                 """
                 # Ground Truth Trajectory from HTC - GREEN
