@@ -668,7 +668,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
 
         // Calcolo varianze per update PXX
-        double sigma_curr = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento
+        double sigma_curr = is_slipping ? 0.25 : _conf.sigma_v; // Aumenta incertezza se slittamento
         double sigma_ds = sigma_curr * abs(ds) + 0.001; // Evita zero
         double combined_sigma = sqrt(pow(_conf.sigma_gyro * weight_gyro, 2) + pow(_conf.sigma_enc_rot * weight_enc, 2));
         double sigma_dtheta = combined_sigma * abs(d_theta_fused) + 0.001; // Evita zero
@@ -687,19 +687,18 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         
 
         // ODOMETRIA + IMU 
-        double avg_theta_partial = _state_partial.x(2) + d_theta_fused / 2.0;
-        _state_partial.x(0) += ds * cos(avg_theta_partial);
-        _state_partial.x(1) += ds * sin(avg_theta_partial);
-        _state_partial.x(2) = normalize_angle(_state_partial.x(2) + d_theta_fused);
+        //double avg_theta_partial = _state_partial.x(2) + d_theta_fused / 2.0;
+        //_state_partial.x(0) += ds * cos(avg_theta_partial);
+        //_state_partial.x(1) += ds * sin(avg_theta_partial);
+        //_state_partial.x(2) = normalize_angle(_state_partial.x(2) + d_theta_fused);
 
         // Correction
         if(_has_rs_update){
-
-          double est_rs_x = _rs_x - (_conf.cam_offset_x * cos(_rs_theta) - _conf.cam_offset_y * sin(_rs_theta));
-          double est_rs_y = _rs_y - (_conf.cam_offset_x * sin(_rs_theta) + _conf.cam_offset_y * cos(_rs_theta));
-
+          est_rs_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
+          est_rs_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
+          
           Vector3d Z;
-          Z << est_rs_x, est_rs_y, _rs_theta;
+          Z << est_rs_x, est_rs_y, _ekf_theta_rs;
 
           Matrix3d R = Matrix3d::Zero();
           R(0, 0) = _conf.sigma_rs_pos * _conf.sigma_rs_pos;
@@ -716,11 +715,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         // OUTPUT
 
-        // Full EKF output
-        //out["pose"]["position"]["x"] = _state.x;
-        //out["pose"]["position"]["y"] = _state.y;
-        //out["pose"]["position"]["z"] = 0.0;
-        //out["pose"]["orientation"]["yaw"] = _state.theta;
+        
 
         // Odometry
         out["debug"]["raw_encoder_only"] = std::vector<double>{_state_enc_only.x, _state_enc_only.y, 0.0};
@@ -728,7 +723,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         // Partial EKF (odom + imu)
         out["debug"]["partial_ekf"] = std::vector<double>{_state_partial.x(0), _state_partial.x(1), 0.0};
 
-        // Pose vector
+        // Full EKF
         out["pose"]["position"] = std::vector<double>{_state.x(0), _state.x(1), 0.0};
         out["pose"]["orientation"] = _state.x(2);
 
@@ -747,12 +742,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["angles"]["ekf_rs"] = _ekf_theta_rs;
 
         //double theta_rs = _rs_theta_unwrapped;
-        if(_aruco_valid_for_vis){
-          double rs_robot_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
-          double rs_robot_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
-
-          out["debug"]["rs_center"] = std::vector<double>{rs_robot_x, rs_robot_y, 0.0};
-        }
+        out["debug"]["rs_center"] = std::vector<double>{est_rs_x, est_rs_y, 0.0};
+        
         if (!_last_agent_id.empty()) out["source_id"] = _last_agent_id;
         out["sim_time"] = _last_timecode;
 
@@ -843,6 +834,9 @@ private:
 
   double _last_input_rs_theta = 0.0;
   bool _aruco_valid_for_vis = false;
+
+  double est_rs_x = 0.0;
+  double est_rs_y = 0.0;
  
   
 

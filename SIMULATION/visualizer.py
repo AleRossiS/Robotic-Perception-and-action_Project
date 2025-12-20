@@ -132,8 +132,8 @@ def main():
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_pos"): main.traj_pos = []
                     main.traj_pos.append(pos)                    
-                    rr.log("robot/FULL_EKF_body", rr.Points3D([pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
-                    rr.log("robot/FULL_EKF_path", rr.LineStrips3D([main.traj_pos], colors=[[150, 150, 150]], radii=0.01)) #sistema colore
+                    rr.log("robot/FULL_EKF_body", rr.Points3D([pos], radii=0.04, colors=[255, 255, 0], labels="EKF"))
+                    rr.log("robot/FULL_EKF_path", rr.LineStrips3D([main.traj_pos], colors=[[255, 255, 0]], radii=0.01)) #sistema colore
                     
                 # NUOVO: Grafico Comparativo Angoli (Chi comanda?)
                 if "debug" in data:
@@ -150,16 +150,16 @@ def main():
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
                     main.traj_raw_enc.append(raw_pos)                    
-                    rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
-                    rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
+                    rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[255, 0, 0], labels="Odometry"))
+                    rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[255, 0, 0]], radii=0.01))
 
                      # partial ekf        
                     partial_pos = data["debug"]["partial_ekf"]
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_partial_ekf"): main.traj_partial_ekf = []
                     main.traj_partial_ekf.append(partial_pos)                    
-                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
-                    rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[150, 150, 150]], radii=0.01))
+                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[0, 255, 0], labels="Partial EKF"))
+                    rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[0, 255, 0]], radii=0.01))
 
                      # Aruco data      
                     rs_center = data["debug"]["rs_center"]
@@ -167,6 +167,7 @@ def main():
                     main.traj_rs_center.append(rs_center)
                     rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01, labels="RS Center Path"))
                     rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02))
+
 
                     # Acceleration from enc vs imu
                     acc_enc = data["debug"].get("accel_enc")
