@@ -109,46 +109,10 @@ def main():
             if time_val is None: time_val = get_nested(data, "/message/timecode")
             if time_val is not None: 
                 rr.set_time_seconds("sim_time", float(time_val))
-            """ 
-            # --- 1. ODOMETRIA (Calcolata al volo per avere un riferimento) ---
-            if topic == "encoders_source":
-                # Leggi encoder
-                enc_l = get_nested(data, "/message/encoders/left")
-                enc_r = get_nested(data, "/message/encoders/right")
-                
-                if last_enc_l is not None and enc_l is not None:
-                    # Calcola delta movimento
-                    dl = ((enc_l - last_enc_l) / TICKS) * 2 * math.pi * R_L
-                    dr = ((enc_r - last_enc_r) / TICKS) * 2 * math.pi * R_R
-                    ds = (dr + dl) / 2.0
-                    dth = (dr - dl) / BASELINE
-                    
-                    # Integra posizione (Semplice Eulero)
-                    odom_x += ds * math.cos(odom_theta)
-                    odom_y += ds * math.sin(odom_theta)
-                    odom_theta += dth
-                    
-                    pos = [odom_x, odom_y, 0.0]
-                    traj_odometry.append(pos)
-                    #if len(traj_odometry) > 5000: traj_odometry.pop(0)
-                    
-                    # Disegna Odometria (RIFERIMENTO - Bianco/Grigio)
-                    rr.log("geometry/walker_odom", rr.LineStrips3D([traj_odometry], colors=[[200, 200, 200]], labels="Walker Frame (Odom)"))
-                if enc_l is not None:
-                    last_enc_l = enc_l
-                    last_enc_r = enc_r
-            """
+           
             # Odometry Filter Trajectory - RED
             if topic == "odometry_filter":
-                """
-                if "pose" in data:
-                    raw_ekf = data["pose"]["orientation"]["yaw"]
-                    if offset_ekf is None: offset_ekf = raw_ekf
-                        
-                    norm_ekf = raw_ekf - offset_ekf
-                    rr.log("debug/compare_yaw/4_ekf_norm", rr.Scalars(norm_ekf))
-                """
-                    
+                """ 
                 if SHOW_3D and "pose_vector" in data:
                     pos = data["pose_vector"] # [x, y, z]
                     traj_odometry.append(pos)
@@ -161,6 +125,15 @@ def main():
                     rr.log("robot/est_body", rr.Points3D([pos], radii=0.03, colors=[255, 0, 0], labels="Odom"))
                     # Scia
                     rr.log("robot/est_path", rr.LineStrips3D([traj_odometry], colors=[[255, 0, 0]], radii=0.005))
+                """
+                if "pose" in data:
+                     # FULL EKF PURA        
+                    pos = data["pose"]["position"]
+                    # Usiamo un nome univoco per la scia raw
+                    if not hasattr(main, "traj_pos"): main.traj_pos = []
+                    main.traj_pos.append(pos)                    
+                    rr.log("robot/FULL_EKF_body", rr.Points3D([pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
+                    rr.log("robot/FULL_EKF_path", rr.LineStrips3D([main.traj_pos], colors=[[150, 150, 150]], radii=0.01)) #sistema colore
                     
                 # NUOVO: Grafico Comparativo Angoli (Chi comanda?)
                 if "debug" in data:
@@ -172,20 +145,26 @@ def main():
                     if th_imu is not None: rr.log("fusion/debug/theta_imu", Scalars(th_imu))
                     #if th_fus is not None: rr.log("fusion/debug/theta_fused", Scalars(th_fus))
                 
-                    # Posizion from raw encoders only            
+                    # ODOMETRIA PURA        
                     raw_pos = data["debug"]["raw_encoder_only"]
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
-                    
-                    main.traj_raw_enc.append(raw_pos)
-                    #if len(main.traj_raw_enc) > 6000: main.traj_raw_enc.pop(0)
-                    
+                    main.traj_raw_enc.append(raw_pos)                    
                     rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
                     rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
 
+                     # partial ekf        
+                    partial_pos = data["debug"]["partial_ekf"]
+                    # Usiamo un nome univoco per la scia raw
+                    if not hasattr(main, "traj_partial_ekf"): main.traj_partial_ekf = []
+                    main.traj_partial_ekf.append(partial_pos)                    
+                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
+                    rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[150, 150, 150]], radii=0.01))
+
+                     # Aruco data      
                     rs_center = data["debug"]["rs_center"]
                     if not hasattr(main, "traj_rs_center"): main.traj_rs_center = []
-                    main.traj_rs_center.append([rs_center[0], rs_center[1], 0.0])
+                    main.traj_rs_center.append(rs_center)
                     rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01, labels="RS Center Path"))
                     rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02))
 

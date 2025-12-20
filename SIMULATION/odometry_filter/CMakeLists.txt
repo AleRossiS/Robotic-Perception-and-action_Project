@@ -66,6 +66,8 @@ FetchContent_Populate(plugin
 
 include_directories(${plugin_SOURCE_DIR}/src)
 
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
 
 # MACROS #######################################################################
 # Call: add_plugin(name [SRCS src1 src2 ...] [LIBS lib1 lib2 ...])
@@ -108,6 +110,10 @@ else()
   set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib;/usr/local/lib")
 endif()
 include_directories(${json_SOURCE_DIR}/include)
+
+include_directories(${EIGEN3_INCLUDE_DIR})
+
+set(plugin_LIBS Eigen3::Eigen)
 
 # These plugins are always build and use for testing
 add_plugin(odometry_filter)
