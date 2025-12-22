@@ -134,6 +134,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double min_imu_accel_for_correction = 0.05;    // Soglia per considerare ferm
         bool enable_slip_check = true;
         double slip_accel_ratio = 1.5;   // Rapporto accel a_enc / a_imu
+        double alpha_a = 0.10;
+        double alpha_v = 0.10;
+        double slip_ratio = 1.5;
 
         int filter_window_rs = 10;
         int filter_window_imu = 5;  
@@ -592,27 +595,24 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //_v_enc_smooth = _filter_enc_v.update(v_enc_raw); //Moving average logic
 
 
-        double alpha_v = 0.10;
-        _v_enc_smooth = (alpha_v * v_enc_raw) + ((1.0 - alpha_v) * _v_enc_smooth); // Low pass filter exponential
+      
+        _v_enc_smooth = (_conf.alpha_v * v_enc_raw) + ((1.0 - _conf.alpha_v) * _v_enc_smooth); // Low pass filter exponential
 
         double a_enc_raw = (_v_enc_smooth - _prev_v_enc) / dt;
         //_a_enc_smooth = _filter_enc_a.update(a_enc_raw); //Moving average logic 
         
 
-        double alpha_a = 0.10;
-        _a_enc_smooth = (alpha_a * a_enc_raw) + ((1.0 - alpha_a) * _a_enc_smooth); // Low pass filter exponential
+    
+        _a_enc_smooth = (_conf.alpha_a * a_enc_raw) + ((1.0 - _conf.alpha_a) * _a_enc_smooth); // Low pass filter exponential
         double a_enc_sma = _filter_enc_a.update(_a_enc_smooth); // Moving average filter
         _prev_v_enc = _v_enc_smooth;
 
         // manipolazione valori imu per inserire ritardo artificiale simile a encoder
-        _imu_accel_smooth_ema1 = (alpha_v * _current_accel_x) + ((1.0 - alpha_v) * _imu_accel_smooth_ema1);
-        _imu_accel_smooth_ema2 = (alpha_a * _imu_accel_smooth_ema1) + ((1.0 - alpha_a) * _imu_accel_smooth_ema2);
+        _imu_accel_smooth_ema1 = (_conf.alpha_v * _current_accel_x) + ((1.0 - _conf.alpha_v) * _imu_accel_smooth_ema1);
+        _imu_accel_smooth_ema2 = (_conf.alpha_a * _imu_accel_smooth_ema1) + ((1.0 - _conf.alpha_a) * _imu_accel_smooth_ema2);
         double a_imu_final = _filter_accel.update(_imu_accel_smooth_ema2);
         //double a_imu_final= _imu_accel_smooth_ema2;
         //double a_imu_final = _current_accel_x;
-
-        
-
 
         bool is_slipping = false;
 
@@ -624,7 +624,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             // Ma l'IMU dice "Movimento blando"
           
 
-          if (abs(a_enc_sma) > abs(a_imu_final)){
+          if (_conf.slip_ratio * abs(a_enc_sma) > abs(a_imu_final)){
             is_slipping = true; // Rilevato slip
             if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
               ds = _prev_ds;
@@ -634,7 +634,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             //if(ratio > 10) ratio = 10.0; // Limite massimo
             //SE ACCELERAZIONE ~0 DS = PREV_DS
 
-            ds = ds / ratio;
+            ds = _conf.slip_ratio * ds / ratio;
             }
             _prev_ds = ds;
           }
@@ -769,6 +769,9 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if(p.contains("sigma_gyro")) _conf.sigma_gyro = p["sigma_gyro"];
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
     if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
+    if(p.contains("alpha_a")) _conf.alpha_a = p["alpha_a"];
+    if(p.contains("alpha_v")) _conf.alpha_v = p["alpha_v"];
+    if(p.contains("slip_ratio")) _conf.slip_ratio = p["slip_ratio"];
 
     //if (p.contains("filter_window_rs")) { // probabilmente inutile
     //        _conf.filter_window_rs = p["filter_window_rs"];
@@ -839,6 +842,11 @@ private:
 
   double est_rs_x = 0.0;
   double est_rs_y = 0.0;
+
+  double fused_velocity = 0.0;
+  double v_enc = 0.0;
+  double v_imu = 0.0;
+  double prev_imu_vel = 0.0;
  
   
 
