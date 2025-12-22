@@ -130,19 +130,19 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double sigma_enc_rot = 0.05;  // Errore encoder rotazionale (rad/s)
         double sigma_gyro    = 0.002; // Errore giroscopio (rad/s)
 
-        double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
-        double static_thresh = 0.05;    // Soglia per considerare ferm
+        //double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
+        double min_imu_accel_for_correction = 0.05;    // Soglia per considerare ferm
         bool enable_slip_check = true;
         double slip_accel_ratio = 1.5;   // Rapporto accel a_enc / a_imu
 
         int filter_window_rs = 10;
         int filter_window_imu = 5;  
-        int filter_window_acc = 10; // Finestra per accelerometro    
+        int filter_window_enc = 10; // Finestra per accelerometro    
 
         double rs_global_rotation = 0.0;
         double cam_offset_x = 0.80;
         double cam_offset_y = 0.0;
-        bool invert_gyro = true;
+        //bool invert_gyro = true;
 
         // Parametri Offset IMU (Lever Arm) nel frame del Robot
         double imu_offset_x = 0.70;
@@ -229,10 +229,10 @@ public:
     _filter_rs_x(10), //Non uso
     _filter_rs_y(10), //Non uso
     _filter_rs_theta(10), //Non uso
-    _filter_gyro(5), //Aumento?
-    _filter_accel(5),//Aumento?
+    _filter_gyro(_conf.filter_window_imu), //Aumento?
+    _filter_accel(_conf.filter_window_imu),//Aumento?
     //_filter_enc_v(10),
-    _filter_enc_a(5)//Aumento?
+    _filter_enc_a(_conf.filter_window_enc)//Aumento?
     {}
   
   // -- Funzione di predizione EKF
@@ -290,23 +290,23 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
   try {
 
     // Timecode
-    double now = 0.0;
-    if(in.contains("message") && in["message"].contains("timecode")){
-        now = in["message"]["timecode"].get<double>();
-    } else if (in.contains("/message/timecode")) { //controlla quale viene usato
-        now = in["/message/timecode"].get<double>();
-    }
-    if(now > 0) _last_timecode = now; //controlla aggiornamento timecode per encoder calcolo velocità e acc
+    if(in["message"].contains("timecode")){
+        _last_timecode = in["message"]["timecode"].get<double>();
+    } //else if (in.contains("/message/timecode")) { //controlla quale viene usato
+        //now = in["/message/timecode"].get<double>();
+    //}
+    //if(now > 0) _last_timecode = now; //controlla aggiornamento timecode per encoder calcolo velocità e acc
 
     // Encoders
-    if (in.contains("/message/encoders/left") || (in.contains("message") && in["message"].contains("encoders"))) {
-        if (in.contains("/message/encoders/left")) {
-            _incoming_ticks_l = (long)in["/message/encoders/left"].get<double>();
-            _incoming_ticks_r = (long)in["/message/encoders/right"].get<double>();
-        } else {//controlla quale viene usato
+    if (in["message"].contains("encoders")) {
+        //if (in.contains("/message/encoders/left")) {
+        //    _incoming_ticks_l = (long)in["/message/encoders/left"].get<double>();
+        //    _incoming_ticks_r = (long)in["/message/encoders/right"].get<double>();
+        //} 
+        //controlla quale viene usato
             _incoming_ticks_l = (long)in["message"]["encoders"]["left"].get<double>();
             _incoming_ticks_r = (long)in["message"]["encoders"]["right"].get<double>();
-        }
+        
 
         if (!_initialized) {
             _prev_ticks_l = _incoming_ticks_l;
@@ -319,17 +319,16 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     }
     
     // --- 3. IMU (NUOVO FORMATO: Array Piatto) ---
-    if (in.contains("message")){
+    if (in["message"].contains("gyro") || in["message"].contains("accel")) {
       //Variabili temporanee
       double gx_body = 0.0, gy_body = 0.0, gz_body = 0.0;
       double ax_body = 0.0, ay_body = 0.0, az_body = 0.0;
-      bool gyro_ready = false;
-      bool accel_ready = false;
+      
 
       //Gyro
-      if (in["message"].contains("gyro")) {
+      //if (in["message"].contains("gyro")) {
         auto& gyro = in["message"]["gyro"];
-        if (gyro.is_array() && gyro.size() >= 3) {
+        //if (gyro.is_array() && gyro.size() >= 3) {
           double raw_gx = gyro[0].get<double>();
           double raw_gy = gyro[1].get<double>();
           double raw_gz = gyro[2].get<double>();
@@ -340,14 +339,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
           gy_body = raw_gx;
           gz_body = -raw_gz;
 
-          gyro_ready = true;
-        }
-      }
+
+        //}
+      //}
 
       // Accel
-      if (in["message"].contains("accel")) {
+      //if (in["message"].contains("accel")) {
         auto& accel = in["message"]["accel"];
-        if (accel.is_array() && accel.size() >= 1) {
+        //if (accel.is_array() && accel.size() >= 1) {
           double raw_ax = accel[0].get<double>() * 9.80665;
           double raw_ay = accel[1].get<double>() * 9.80665;
           double raw_az = accel[2].get<double>() * 9.80665;
@@ -355,21 +354,18 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
           ax_body = raw_ay;
           ay_body = raw_ax;
           az_body = -raw_az;
+        //}
+      
+      // Process IMU Data if both gyro and accel are ready
 
-          accel_ready = true;
-        }
-      }
-
-      if (gyro_ready && accel_ready) {
-
-        double dt_imu = now - _prev_imu_timecode;
+        double dt_imu = _last_timecode - _prev_imu_timecode;
         if(dt_imu <= 0.0) dt_imu = 1e-6; // Prevenzione divisione per zero
 
         if(!_first_imu_frame){
           // Calcolo Accelerazione Angolare (Alpha = dOmega/dt)
           double alpha_x = (gx_body - _prev_gyro_x) / dt_imu;
           double alpha_y = (gy_body - _prev_gyro_y) / dt_imu;
-          double alpha_z = (gz_body - _prev_gyro_z) / dt_imu; // Non uso
+          //double alpha_z = (gz_body - _prev_gyro_z) / dt_imu; // Non uso
 
           // Vettore Offset (lever arm)
           double rx = _conf.imu_offset_x;
@@ -378,26 +374,26 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
           // Termine tangenziale (Alpha x R)
           double tan_x = alpha_y * rz - gz_body * ry;
-          double tan_y = gz_body * rx - alpha_x * rz; // Non uso
-          double tan_z = alpha_x * ry - alpha_y * rx; // Non uso
+          //double tan_y = gz_body * rx - alpha_x * rz; // Non uso
+          //double tan_z = alpha_x * ry - alpha_y * rx; // Non uso
 
           // Termine centripeto (Omega x (Omega x R))
           // Omega x R
-          double oxr_x = gy_body * rz - gz_body * ry; // Non uso
+          //double oxr_x = gy_body * rz - gz_body * ry; // Non uso
           double oxr_y = gz_body * rx - gx_body * rz;
           double oxr_z = gx_body * ry - gy_body * rx;
           // Omega x (Omega x R)
           double cent_x = gy_body * oxr_z - gz_body * oxr_y;
-          double cent_y = gz_body * oxr_x - gx_body * oxr_z; // Non uso
-          double cent_z = gx_body * oxr_y - gy_body * oxr_x; // Non uso
+          //double cent_y = gz_body * oxr_x - gx_body * oxr_z; // Non uso
+          //double cent_z = gx_body * oxr_y - gy_body * oxr_x; // Non uso
           
           // Correzione finale
           // a_body = a_measured - a_tangential - a_centripetal
           double ax_corrected = ax_body - tan_x - cent_x;
 
           // Aggiorna filtro
-          double val_gyro_z = _conf.invert_gyro ? -gz_body : gz_body;
-          _current_gyro_z = _filter_gyro.update(val_gyro_z);
+          //double val_gyro_z = _conf.invert_gyro ? -gz_body : gz_body;
+          _current_gyro_z = _filter_gyro.update(gz_body);
 
           // Accelerometro X
           if(!_bias_computed){
@@ -421,59 +417,64 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _prev_gyro_x = gx_body;
         _prev_gyro_y = gy_body;
         _prev_gyro_z = gz_body;
-        _prev_imu_timecode = now;
+        _prev_imu_timecode = _last_timecode;
         _first_imu_frame = false;
         _has_gyro = true;
         _has_imu = true;
       }   
-    }
+    
 
     // RealSense
-    double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
-    bool rs_found = false;
+    
 
-    if (in.contains("message") && in["message"].contains("pose")) {
+    if (in["message"]["pose"].contains("position") && in["message"]["pose"].contains("attitude")) {
+      double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
+      //bool rs_found = false;
       auto& p = in["message"]["pose"];
         // Position
-      if (p.contains("position") && p["position"].is_array() && p["position"].size() > 0) {
+      //if (p.contains("position") && p.contains("attitude") && p["position"][0].is_array() && p["attitude"][0].is_array()) { //leave this for robustness in case of different formats
         // Check if it's [[x,y,z]] or [x,y,z]
-        if (p["position"][0].is_array()) {
+        //if (p["position"][0].is_array()) {
           raw_rs_x = p["position"][0][0].get<double>();
           raw_rs_y = p["position"][0][1].get<double>();
-        } else { // Capisci quale usi
-          raw_rs_x = p["position"][0].get<double>();
-          raw_rs_y = p["position"][1].get<double>();
-        }
+        //}// else { // Capisci quale usi
+        //  raw_rs_x = p["position"][0].get<double>();
+        //  raw_rs_y = p["position"][1].get<double>();
+        //}
 
         // Angle (Handle nested arrays)
-      if (p.contains("attitude")) {
-        if(p["attitude"][0].is_array()){
+      //if (p.contains("attitude")) {
+        //if(p["attitude"][0].is_array()){
         raw_rs_theta = p["attitude"][0][2].get<double>();
-        } else { // Capisci quale usi
-        raw_rs_theta = p["attitude"][2].get<double>();
+        //} else { // Capisci quale usi
+        //raw_rs_theta = p["attitude"][2].get<double>();
         //else raw_rs_theta = att.get<double>(); // If scalar
-        }
-      }
-        rs_found = true;
-      }
+       // }
+      //}
+        //rs_found = true;
+      //} //else{
+        // return message error for format issue
+        //_error = "RealSense pose format error.";
+        //return return_type::error;
+      //}
       
       
       
-    }
+    
 
 
     // Anti-freeze check & filtering
-    if (rs_found) {
+    //if (rs_found) {
 
       double delta_input = raw_rs_theta - _last_input_rs_theta;
 
-      _last_input_rs_theta = raw_rs_theta;
+      //_last_input_rs_theta = raw_rs_theta;
 
-      if(abs(delta_input) < 1e-6){
-        _filter_rs_x.clear(); //Non uso
-        _filter_rs_y.clear();//Non uso
-        _filter_rs_theta.clear();//Non uso
-        _first_rs_frame = true;
+      if(abs(delta_input) < 1e-6){ // semplicemente salta il dato se uguale al precedente
+       // _filter_rs_x.clear(); //Non uso
+       // _filter_rs_y.clear();//Non uso
+       // _filter_rs_theta.clear();//Non uso
+       // _first_rs_frame = true;
       } else {
         
 
@@ -517,11 +518,11 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       //raw_rs_y = y_new;
       //raw_rs_theta += rot;
 
-      if(_first_rs_frame){ //Non uso
-      _rs_theta_unwrapped = raw_rs_theta;
-      _prev_rs_theta_raw = raw_rs_theta;
-      _first_rs_frame = false;
-      }
+      //if(_first_rs_frame){ //Non uso
+      //_rs_theta_unwrapped = raw_rs_theta;
+      //_prev_rs_theta_raw = raw_rs_theta;
+      //_first_rs_frame = false;
+     // }
 
       //double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
 
@@ -598,7 +599,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //_a_enc_smooth = _filter_enc_a.update(a_enc_raw); //Moving average logic 
         
 
-        double alpha_a = 0.20;
+        double alpha_a = 0.10;
         _a_enc_smooth = (alpha_a * a_enc_raw) + ((1.0 - alpha_a) * _a_enc_smooth); // Low pass filter exponential
         double a_enc_sma = _filter_enc_a.update(_a_enc_smooth); // Moving average filter
         _prev_v_enc = _v_enc_smooth;
@@ -615,16 +616,17 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         bool is_slipping = false;
 
-        double min_imu_accel_for_correction = 0.1;
+        //double min_imu_accel_for_correction = 0.05;
 
         if(_conf.enable_slip_check && _bias_computed){
             // 2. Acceleration Mismatch (Burnout Check)
             // Se gli encoder dicono "Partenza a razzo" (alta accel)
             // Ma l'IMU dice "Movimento blando"
-          is_slipping = true; // Rilevato slip
+          
 
           if (abs(a_enc_sma) > abs(a_imu_final)){
-            if(abs(a_imu_final) > min_imu_accel_for_correction){
+            is_slipping = true; // Rilevato slip
+            if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
               ds = _prev_ds;
             } else{
             double ratio = abs(a_enc_sma) / abs(a_imu_final);
@@ -634,8 +636,6 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
             ds = ds / ratio;
             }
-            _prev_ds = ds;
-          } else{
             _prev_ds = ds;
           }
           
@@ -770,27 +770,29 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
     if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
 
-    if (p.contains("filter_window_rs")) { // probabilmente inutile
-            _conf.filter_window_rs = p["filter_window_rs"];
-            _filter_rs_x.resize(_conf.filter_window_rs);
-            _filter_rs_y.resize(_conf.filter_window_rs);
-    }
+    //if (p.contains("filter_window_rs")) { // probabilmente inutile
+    //        _conf.filter_window_rs = p["filter_window_rs"];
+    //        _filter_rs_x.resize(_conf.filter_window_rs);
+    //        _filter_rs_y.resize(_conf.filter_window_rs);
+    // }
 
-    if (p.contains("filter_window_imu")) { // probabilmente inutile
-      _conf.filter_window_imu = p["filter_window_imu"];
-      _filter_gyro.resize(_conf.filter_window_imu);
-      _filter_accel.resize(_conf.filter_window_acc);
-    }
+    //if (p.contains("filter_window_imu")) { // probabilmente inutile
+    //  _conf.filter_window_imu = p["filter_window_imu"];
+    //  _filter_gyro.resize(_conf.filter_window_imu);
+    //  _filter_accel.resize(_conf.filter_window_acc);
+    //}
 
     
 
     if( p.contains("cam_offset_x")) _conf.cam_offset_x = p["cam_offset_x"];
     if( p.contains("cam_offset_y")) _conf.cam_offset_y = p["cam_offset_y"];
     if( p.contains("rs_global_rotation")) _conf.rs_global_rotation = p["rs_global_rotation"];
-    if( p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
+    if( p.contains("filter_window_imu")) _conf.filter_window_imu = p["filter_window_imu"];
+    if( p.contains("filter_window_enc")) _conf.filter_window_enc = p["filter_window_enc"];
+    //if( p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
 
-    if (p.contains("slip_accel_thresh")) _conf.slip_accel_thresh = p["slip_accel_thresh"];
-    if (p.contains("static_thresh")) _conf.static_thresh = p["static_thresh"];
+    //if (p.contains("slip_accel_thresh")) _conf.slip_accel_thresh = p["slip_accel_thresh"];
+    if (p.contains("min_imu_accel_for_correction")) _conf.min_imu_accel_for_correction = p["min_imu_accel_for_correction"];
     if (p.contains("enable_slip_check")) _conf.enable_slip_check = p["enable_slip_check"];
     if(p.contains("slip_accel_ratio")) _conf.slip_accel_ratio = p["slip_accel_ratio"];
 
