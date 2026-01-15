@@ -112,7 +112,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
         bool is_slipping = false; 
     } _debug_slip;
 
-
+//MOST VALUES ARE DECLARED HERE, BUT SOME ARE REDEFINED IN THE MADS.INI FILE
     // Parametri Cinematici (Calibrati)
     struct Params {
         double wheel_radius_left = 0.0873;  // RL [m] (Esempio, da calibrare)
@@ -321,7 +321,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         }
     }
     
-    // --- 3. IMU (NUOVO FORMATO: Array Piatto) ---
+    // --- 3. IMU
     if (in["message"].contains("gyro") || in["message"].contains("accel")) {
       //Variabili temporanee
       double gx_body = 0.0, gy_body = 0.0, gz_body = 0.0;
