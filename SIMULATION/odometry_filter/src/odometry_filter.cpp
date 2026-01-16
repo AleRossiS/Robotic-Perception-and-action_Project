@@ -147,6 +147,8 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double cam_offset_y = 0.0;
         //bool invert_gyro = true;
 
+        bool aruco_is_walker_center = false; //param to know if aruco is at walker center or camera center
+
         // Parametri Offset IMU (Lever Arm) nel frame del Robot
         double imu_offset_x = 0.70;
         double imu_offset_y = 0.20;
@@ -214,6 +216,17 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _rs_y = 0.0;
     double _rs_theta = 0.0;
     bool _has_rs_update = false;
+
+    // Variabili interne per debug e calcolo velocità
+    //double est_rs_x = 0.0;
+    //double est_rs_y = 0.0;
+    //double fused_velocity = 0.0;
+    double _prev_input_rs_theta = 0.0; 
+    //bool _aruco_valid_for_vis = false;
+
+    //htc position
+    double _htc_x = 0.0;
+    double _htc_y = 0.0;
 
    
 
@@ -320,6 +333,26 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             _has_new_encoder_data = true;
         }
     }
+
+    // HTC
+    if(in.contains("agent_id") && 
+       in["agent_id"].get<string>() == "pose_htc_source") {
+        try{
+          if(in["message"]["pose"].contains("position")){
+            auto& pos = in["message"]["pose"]["position"];
+
+            if(pos.is_array() && pos.size() >= 2){
+
+              _htc_x = pos[0].get<double>();
+              _htc_y = pos[1].get<double>();
+              //printf("HTC Position: X: %.3f Y: %.3f\n", _htc_x, _htc_y);
+            }
+            //else{printf("HTC Position data malformed\n");}
+          }
+        } catch(...){
+          //printf("HTC Position data error\n");
+        }
+    }  
     
     // --- 3. IMU
     if (in["message"].contains("gyro") || in["message"].contains("accel")) {
@@ -350,13 +383,13 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       //if (in["message"].contains("accel")) {
         auto& accel = in["message"]["accel"];
         //if (accel.is_array() && accel.size() >= 1) {
-          double raw_ax = accel[0].get<double>() * 9.80665;
+          // double raw_ax = accel[0].get<double>() * 9.80665; not used
           double raw_ay = accel[1].get<double>() * 9.80665;
-          double raw_az = accel[2].get<double>() * 9.80665;
+         // double raw_az = accel[2].get<double>() * 9.80665; not used
           
           ax_body = raw_ay;
-          ay_body = raw_ax;
-          az_body = -raw_az;
+          // ay_body = raw_ax; not used
+          // az_body = -raw_az; not used
         //}
       
       // Process IMU Data if both gyro and accel are ready
@@ -437,22 +470,21 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         // Position
       //if (p.contains("position") && p.contains("attitude") && p["position"][0].is_array() && p["attitude"][0].is_array()) { //leave this for robustness in case of different formats
         // Check if it's [[x,y,z]] or [x,y,z]
-        //if (p["position"][0].is_array()) {
+        if (p["position"][0].is_array()) {
           raw_rs_x = p["position"][0][0].get<double>();
           raw_rs_y = p["position"][0][1].get<double>();
-        //}// else { // Capisci quale usi
-        //  raw_rs_x = p["position"][0].get<double>();
-        //  raw_rs_y = p["position"][1].get<double>();
-        //}
+        } else { // Capisci quale usi. AGGIORNAMENTO: CI SONO DUE FORMATI PERCHÈ I DATI NUOVI LI HANNO REGISTRATI IN UN SETUP LEGGERMENTE DIVERSO
+          raw_rs_x = p["position"][0].get<double>();
+          raw_rs_y = p["position"][1].get<double>();
+        }
 
         // Angle (Handle nested arrays)
       //if (p.contains("attitude")) {
-        //if(p["attitude"][0].is_array()){
+      if(p["attitude"][0].is_array()){
         raw_rs_theta = p["attitude"][0][2].get<double>();
-        //} else { // Capisci quale usi
-        //raw_rs_theta = p["attitude"][2].get<double>();
-        //else raw_rs_theta = att.get<double>(); // If scalar
-       // }
+      } else { // Capisci quale usi
+        raw_rs_theta = p["attitude"][2].get<double>();
+      }
       //}
         //rs_found = true;
       //} //else{
@@ -471,13 +503,13 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
       double delta_input = raw_rs_theta - _last_input_rs_theta;
 
-      //_last_input_rs_theta = raw_rs_theta;
+      _last_input_rs_theta = raw_rs_theta;
 
-      if(abs(delta_input) < 1e-6){ // semplicemente salta il dato se uguale al precedente
-       // _filter_rs_x.clear(); //Non uso
-       // _filter_rs_y.clear();//Non uso
-       // _filter_rs_theta.clear();//Non uso
-       // _first_rs_frame = true;
+      if(abs(delta_input) < 1e-6 || abs(delta_input) > 0.15){ // semplicemente salta il dato se uguale al precedente o salta
+        _filter_rs_x.clear(); //Non uso
+        _filter_rs_y.clear();//Non uso
+        _filter_rs_theta.clear();//Non uso
+        //_first_rs_frame = true;
       } else {
         
 
@@ -540,15 +572,15 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       while(_ekf_theta_rs > M_PI) _ekf_theta_rs -= 2.0 * M_PI;
       while(_ekf_theta_rs < -M_PI) _ekf_theta_rs += 2.0 * M_PI;
     
-      //_rs_x = _filter_rs_x.update(x_new);
-      //_rs_y = _filter_rs_y.update(y_new);
-      //_rs_theta = _filter_rs_theta.update(theta_new);
+      _rs_x = _filter_rs_x.update(_rs_x);
+      _rs_y = _filter_rs_y.update(_rs_y);
+      _rs_theta = _filter_rs_theta.update(_rs_theta);
       _rs_theta = theta_new;
       
       _has_rs_update = true;
-      _prev_raw_rs_x = _rs_x;
-      _prev_raw_rs_y = _rs_y;
-      _aruco_valid_for_vis = true;
+      //_prev_raw_rs_x = _rs_x;
+      //_prev_raw_rs_y = _rs_y;
+      //_aruco_valid_for_vis = true;
       }
     }
   
@@ -618,28 +650,39 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         //double min_imu_accel_for_correction = 0.05;
 
-        if(_conf.enable_slip_check && _bias_computed){
+        double v_imu_pred = fused_velocity + a_imu_final * dt;
+        double slip_threshold = 0.15;
+        double v_diff = abs(v_imu_pred - _v_enc_smooth);
+
+        if(_conf.enable_slip_check && _bias_computed && v_diff > slip_threshold){
             // 2. Acceleration Mismatch (Burnout Check)
             // Se gli encoder dicono "Partenza a razzo" (alta accel)
             // Ma l'IMU dice "Movimento blando"
           
 
-          if (_conf.slip_ratio * abs(a_enc_sma) > abs(a_imu_final)){
+          //if (_conf.slip_ratio * abs(a_enc_sma) > abs(a_imu_final)){
             is_slipping = true; // Rilevato slip
-            if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
-              ds = _prev_ds;
-            } else{
-            double ratio = abs(a_enc_sma) / abs(a_imu_final);
+            fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
+        } else{
+          fused_velocity = (0.9 * _v_enc_smooth) + (0.1 * v_imu_pred); // Nessun slip, usa velocità encoder
+        }
+
+        ds = fused_velocity * dt;
+            
+        //if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
+          //    ds = _prev_ds;
+           // } else{
+           // double ratio = abs(a_enc_sma) / abs(a_imu_final);
 
             //if(ratio > 10) ratio = 10.0; // Limite massimo
             //SE ACCELERAZIONE ~0 DS = PREV_DS
 
-            ds = _conf.slip_ratio * ds / ratio;
-            }
-            _prev_ds = ds;
-          }
+           // ds = _conf.slip_ratio * ds / ratio;
+            //}
+            //_prev_ds = ds;
+          //}
           
-        }
+        //}
 
         _debug_slip.enc_accel = a_enc_sma;
         _debug_slip.imu_accel = a_imu_final;
@@ -694,8 +737,17 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         // Correction
         if(_has_rs_update){
+
+
+          // Dataset logic
+          if(_conf.aruco_is_walker_center){
+            est_rs_x = _rs_x;
+            est_rs_y = _rs_y;
+          }else{
+          
           est_rs_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
           est_rs_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
+          }
           
           Vector3d Z;
           Z << est_rs_x, est_rs_y, _ekf_theta_rs;
@@ -731,6 +783,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["accel_enc"] = _debug_slip.enc_accel;
         out["debug"]["accel_imu"] = _debug_slip.imu_accel;
         out["debug"]["is_slipping"] = _debug_slip.is_slipping ? 1.0 : 0.0;
+        out["debug"]["fused_velocity"] = fused_velocity;
 
         // Angles debug
         out["debug"]["theta_enc"] = _debug.theta_enc_only;
@@ -743,6 +796,9 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         //double theta_rs = _rs_theta_unwrapped;
         out["debug"]["rs_center"] = std::vector<double>{est_rs_x, est_rs_y, 0.0};
+
+        //htc position
+        out["debug"]["htc_position"] = std::vector<double>{_htc_x, _htc_y, 0.0};
         
         if (!_last_agent_id.empty()) out["source_id"] = _last_agent_id;
         out["sim_time"] = _last_timecode;
@@ -799,6 +855,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if (p.contains("enable_slip_check")) _conf.enable_slip_check = p["enable_slip_check"];
     if(p.contains("slip_accel_ratio")) _conf.slip_accel_ratio = p["slip_accel_ratio"];
 
+    if(p.contains("aruco_is_walker_center")) _conf.aruco_is_walker_center = p["aruco_is_walker_center"];
+
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
    // _params.merge_patch(*(json *)params);
@@ -814,9 +872,10 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     _initialized = false;
     _prev_raw_rs_x = -9999.0;
     _prev_raw_rs_y = -9999.0;
-    _first_rs_frame = true;
+    //_first_rs_frame = true;
     _rs_theta_unwrapped = 0.0;
     _prev_rs_theta_raw = 0.0;
+    fused_velocity = 0.0;
       
   }
 /*
@@ -835,10 +894,10 @@ private:
   // Define the fields that are used to store internal resources
   double _prev_rs_theta_raw = 0.0;
   double _rs_theta_unwrapped = 0.0;
-  bool _first_rs_frame = true;
+  //bool _first_rs_frame = true;
 
   double _last_input_rs_theta = 0.0;
-  bool _aruco_valid_for_vis = false;
+  //bool _aruco_valid_for_vis = false;
 
   double est_rs_x = 0.0;
   double est_rs_y = 0.0;

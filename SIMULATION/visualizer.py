@@ -10,7 +10,7 @@ from rerun.archetypes import Scalars
 SHOW_3D = True 
 # Finestra per la media mobile (solo visualizzazione)
 SMOOTH_WINDOW = 10 
-RS_YAW_OFFSET = 0.0 * (3.14159 / 180.0)
+RS_YAW_OFFSET = 0.0
 RS_POS_OFFSET_X = 0.0 
 RS_POS_OFFSET_Y = 0.0 
 
@@ -77,10 +77,10 @@ def main():
     
     
 
-    traj_odometry = []
+    #traj_odometry = []
     #traj_ground_truth = []
-    traj_rs = []
-    traj_rs_aligned = []
+    #traj_rs = []
+    #traj_rs_aligned = []
 
     # Stato Odometria (Integrata a mano per confronto)
     odom_x, odom_y, odom_theta = 0.0, 0.0, 0.0
@@ -137,13 +137,16 @@ def main():
                     
                 # NUOVO: Grafico Comparativo Angoli (Chi comanda?)
                 if "debug" in data:
-                    th_enc = data["debug"].get("theta_enc")
-                    th_imu = data["debug"].get("theta_imu")
+                    #th_enc = data["debug"].get("theta_enc")
+                    #th_imu = data["debug"].get("theta_imu")
                     #th_fus = data["debug"].get("theta_fused")
                     
-                    if th_enc is not None: rr.log("fusion/debug/theta_encoder", Scalars(th_enc))
-                    if th_imu is not None: rr.log("fusion/debug/theta_imu", Scalars(th_imu))
+                    if "theta_enc" in data["debug"]: rr.log("fusion/debug/theta_encoder", Scalars(data["debug"]["theta_enc"]))
+                    if "theta_imu" in data["debug"]: rr.log("fusion/debug/theta_imu", Scalars(data["debug"]["theta_imu"]))
                     #if th_fus is not None: rr.log("fusion/debug/theta_fused", Scalars(th_fus))
+
+                    if "fused_velocity" in data["debug"]:
+                        rr.log("fusion/debug/velocity_fused", Scalars(data["debug"]["fused_velocity"]))
                 
                     # ODOMETRIA PURA        
                     raw_pos = data["debug"]["raw_encoder_only"]
@@ -165,8 +168,18 @@ def main():
                     rs_center = data["debug"]["rs_center"]
                     if not hasattr(main, "traj_rs_center"): main.traj_rs_center = []
                     main.traj_rs_center.append(rs_center)
-                    rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01, labels="RS Center Path"))
-                    rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02))
+                    rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01))
+                    rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02, labels="RS Center Path"))
+
+                    
+                    # Htc position
+                    if "htc_position" in data["debug"]:
+                        htc_pos = data["debug"]["htc_position"]
+                        if not hasattr(main, "traj_htc_position"): main.traj_htc_position = []
+                        main.traj_htc_position.append(htc_pos)
+                        rr.log("robot/htc_position_path", rr.LineStrips3D([main.traj_htc_position], colors=[[0, 255, 0]], radii=0.01))
+                        rr.log("robot/htc_position_debug", rr.Points3D([htc_pos], colors=[[0, 255, 0]], radii=0.02, labels="HTC"))
+                    
 
 
                     # Acceleration from enc vs imu
@@ -194,47 +207,50 @@ def main():
                 elif topic == "pose_htc_source":
                     x = get_nested(data, "/message/pose/position/0")
                     y = get_nested(data, "/message/pose/position/1")
-                    z = get_nested(data, "/message/pose/position/2")
-                        
+
+                    #if x is  None: x = get_nested(data, "/message/pose/position/0")
+                    #if y is  None: y = get_nested(data, "/message/pose/position/1")
+
                     if x is not None and y is not None:
-                        pos = [float(x), float(y), float(z) if z else 0.0]
-                        traj_ground_truth.append(pos)
-                        if len(traj_ground_truth)>6000: traj_ground_truth.pop(0)
-                        rr.log("robot/gt_body", rr.Points3D([pos], radii=0.03, colors=[0, 255, 0], labels="GT"))
-                        rr.log("robot/gt_path", rr.LineStrips3D([traj_ground_truth], colors=[[0, 255, 0]], radii=0.005))
+                        htc_pos = [float(x), float(y), 0.0]
+                        if not hasattr(main, "traj_ground_truth"): main.traj_ground_truth = []
+                        main.traj_ground_truth.append(htc_pos)
+
+                        rr.log("robot/gt_body", rr.Points3D([htc_pos], radii=0.03, colors=[0, 255, 0], labels="GT"))
+                        rr.log("robot/gt_path", rr.LineStrips3D([main.traj_ground_truth], colors=[[0, 255, 0]], radii=0.005))
                 """
-                
+                    
+                """
+                # RealSense Trajectory - CYAN
+                elif topic == "pose_rs_source":
+                    # Leggi posizione RealSense
+                    rs_x = get_nested(data, "/message/pose/position/0/0")
+                    rs_y = - get_nested(data, "/message/pose/position/0/1")
+                    
+                    if rs_x is None: # Fallback formato piatto
+                        rs_x = get_nested(data, "/message/pose/position/0")
+                        rs_y = - get_nested(data, "/message/pose/position/1")
 
-            # RealSense Trajectory - CYAN
-            elif topic == "pose_rs_source":
-                # Leggi posizione RealSense
-                rs_x = get_nested(data, "/message/pose/position/0/0")
-                rs_y = - get_nested(data, "/message/pose/position/0/1")
-                
-                if rs_x is None: # Fallback formato piatto
-                    rs_x = get_nested(data, "/message/pose/position/0")
-                    rs_y = - get_nested(data, "/message/pose/position/1")
+                    if rs_x is not None:
+                        # A. Dato Grezzo (Come arriva dal sensore)
+                        traj_rs.append([rs_x, rs_y, 0.0])
+                        #if len(traj_rs) > 5000: traj_rs.pop(0)
 
-                if rs_x is not None:
-                    # A. Dato Grezzo (Come arriva dal sensore)
-                    traj_rs.append([rs_x, rs_y, 0.0])
-                    #if len(traj_rs) > 5000: traj_rs.pop(0)
-
-                    # B. Dato Allineato (Ruotato di 135 gradi)
-                    # Applichiamo la rotazione al punto
-                    rot_x, rot_y = rotate_point(rs_x, rs_y, RS_YAW_OFFSET)
-                    
-                    # Aggiungiamo l'offset di traslazione (se serve)
-                    aligned_x = rot_x + RS_POS_OFFSET_X
-                    aligned_y = rot_y + RS_POS_OFFSET_Y
-                    
-                    traj_rs_aligned.append([aligned_x, aligned_y, 0.0])
-                    #if len(traj_rs_aligned) > 5000: traj_rs_aligned.pop(0)
-                    
-                    # Disegna Allineato (Verde - Corretto?)
-                    rr.log("geometry/realsense", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 0]], labels=f"Aruco"))
-                    
-                
+                        # B. Dato Allineato (Ruotato di 135 gradi)
+                        # Applichiamo la rotazione al punto
+                        rot_x, rot_y = rotate_point(rs_x, rs_y, RS_YAW_OFFSET)
+                        
+                        # Aggiungiamo l'offset di traslazione (se serve)
+                        aligned_x = rot_x + RS_POS_OFFSET_X
+                        aligned_y = rot_y + RS_POS_OFFSET_Y
+                        
+                        traj_rs_aligned.append([aligned_x, aligned_y, 0.0])
+                        #if len(traj_rs_aligned) > 5000: traj_rs_aligned.pop(0)
+                        
+                        # Disegna Allineato (Verde - Corretto?)
+                        rr.log("geometry/realsense", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 0]], labels=f"Aruco"))
+                        
+                """
 
             # IMU Data Visualization - GRAPHS
             elif topic == "imu_source":
