@@ -502,15 +502,28 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     //if (rs_found) {
 
       double delta_input = raw_rs_theta - _last_input_rs_theta;
+      bool jump = false;
 
       _last_input_rs_theta = raw_rs_theta;
 
-      if(abs(delta_input) < 1e-6 || abs(delta_input) > 0.15){ // semplicemente salta il dato se uguale al precedente o salta
+      if(abs(delta_input) < 1e-6){ // semplicemente salta il dato se uguale al precedente o salta
         _filter_rs_x.clear(); //Non uso
         _filter_rs_y.clear();//Non uso
         _filter_rs_theta.clear();//Non uso
         //_first_rs_frame = true;
       } else {
+
+        if(abs(delta_input) == M_PI && jump == false){ //DEVI DARE UN RANGE INTORNO M_PI PER EVITARE PROBLEMI DI PRECISIONE
+          jump = true;
+          raw_rs_theta -= delta_input;
+        } else if(abs(delta_input) != M_PI && jump == true){
+          raw_rs_theta -= delta_input;
+        } else if(abs(delta_input) == M_PI && jump == true){
+          raw_rs_theta -= delta_input;
+          jump = false;
+        }
+
+
         
 
       // TEST
