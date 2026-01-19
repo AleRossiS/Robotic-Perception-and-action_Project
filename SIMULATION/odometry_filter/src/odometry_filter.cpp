@@ -210,6 +210,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _prev_raw_rs_x = -9999.0;
     double _prev_raw_rs_y = -9999.0;
     double _ekf_theta_rs = 0.0;
+    double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
 
     // Correction data RealSense
     double _rs_x = 0.0;
@@ -304,6 +305,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
   try {
+
 
     // Timecode
     if(in["message"].contains("timecode")){
@@ -463,8 +465,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     // RealSense
     
 
-    if (in["message"]["pose"].contains("position") && in["message"]["pose"].contains("attitude")) {
-      double raw_rs_x = 0.0, raw_rs_y = 0.0, raw_rs_theta = 0.0;
+    if (in["agent_id"].get<string>() == "pose_rs_source" && in["message"]["pose"].contains("position") && in["message"]["pose"].contains("attitude")) {
+      
       //bool rs_found = false;
       auto& p = in["message"]["pose"];
         // Position
@@ -492,39 +494,73 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //_error = "RealSense pose format error.";
         //return return_type::error;
       //}
-      
-      
-      
-    
 
-
-    // Anti-freeze check & filtering
+       // Anti-freeze check & filtering
     //if (rs_found) {
 
       double delta_input = raw_rs_theta - _last_input_rs_theta;
-      bool jump = false;
 
       _last_input_rs_theta = raw_rs_theta;
 
-      if(abs(delta_input) < 1e-6){ // semplicemente salta il dato se uguale al precedente o salta
+      if(abs(delta_input) < 1e-3){ // semplicemente salta il dato se uguale al precedente o salta
         _filter_rs_x.clear(); //Non uso
         _filter_rs_y.clear();//Non uso
         _filter_rs_theta.clear();//Non uso
         //_first_rs_frame = true;
       } else {
 
-        if(abs(delta_input) == M_PI && jump == false){ //DEVI DARE UN RANGE INTORNO M_PI PER EVITARE PROBLEMI DI PRECISIONE
-          jump = true;
+        /*
+      
+      double robot_theta = normalize_angle(_state.x(2));
+      double candidate_rs_theta = normalize_angle(raw_rs_theta +_conf.rs_global_rotation);
+      double angle_diff = candidate_rs_theta - robot_theta;
+
+      while(angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
+      while(angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
+
+      if(angle_diff > M_PI/6.0){
+        raw_rs_theta -= angle_diff;
+      } else if(angle_diff < -M_PI/6.0){
+        raw_rs_theta -= angle_diff;
+      } //else if(angle_diff < -M_PI/10.0 && angle_diff > -M_PI/3.0){
+        //raw_rs_theta += angle_diff;
+      //} else if(angle_diff > M_PI/10.0 && angle_diff < M_PI/3.0){
+        //raw_rs_theta -= angle_diff;
+      //}
+
+
+
+      raw_rs_theta = normalize_angle(raw_rs_theta);
+
+*/
+   
+
+/*
+
+        if(delta_input <= (M_PI + 0.2)&& delta_input >= (M_PI - 0.2) && jump_pos == false && jump_neg == false){ // se angolo salta di pi
+          jump_pos = true;
           raw_rs_theta -= delta_input;
-        } else if(abs(delta_input) != M_PI && jump == true){
+        } else if(delta_input <= 0.1 && delta_input >= -0.1 && jump_pos == true){ // se salta e resta sopra di +pi
+          raw_rs_theta -= M_PI;
+        } else if(delta_input >= -(M_PI + 0.2) && delta_input <= -(M_PI - 0.2)&& jump_neg == false && jump_pos == false){//se salta di -pi quando non era già saltato
+          jump_neg = true;
           raw_rs_theta -= delta_input;
-        } else if(abs(delta_input) == M_PI && jump == true){
-          raw_rs_theta -= delta_input;
-          jump = false;
+        } else if(abs(delta_input) <= (M_PI + 0.2) && abs(delta_input)>= (M_PI - 0.2)&& jump_pos == true){ //se salta quando era già saltato in positivo 
+          jump_pos = false;
+        } else if(delta_input <= 0.1 && delta_input >= -0.1 && jump_neg == true){// se salta e resta sotto di -pi
+          raw_rs_theta += M_PI;
+        } else if(abs(delta_input) <= (M_PI + 0.2) && abs(delta_input)>= (M_PI - 0.2)&& jump_neg == true){ //se salta quando era già saltato in negativo
+          jump_neg = false;
+        } else if(delta_input >= -(2*M_PI + 0.2) && delta_input <= -(2*M_PI - 0.2) && jump_pos == true){ // se dal salto di +pi salta a -pi
+          raw_rs_theta += M_PI;
+          jump_pos = false;
+          jump_neg = true;
+        } else if(delta_input <= (2*M_PI + 0.2) && delta_input >= (2*M_PI - 0.2) && jump_neg == true){ // se da -pi salta a +pi
+          raw_rs_theta -= M_PI;
+          jump_neg = false;
+          jump_pos = true;
         }
-
-
-        
+*/
 
       // TEST
 
@@ -581,14 +617,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       _prev_rs_theta_raw = theta_new;
       //raw_rs_theta = raw_rs_theta;
 
-      _ekf_theta_rs = theta_new - M_PI;
-      while(_ekf_theta_rs > M_PI) _ekf_theta_rs -= 2.0 * M_PI;
-      while(_ekf_theta_rs < -M_PI) _ekf_theta_rs += 2.0 * M_PI;
+      _ekf_theta_rs = theta_new;
+      //while(_ekf_theta_rs > M_PI) _ekf_theta_rs -= 2.0 * M_PI;
+      //while(_ekf_theta_rs < -M_PI) _ekf_theta_rs += 2.0 * M_PI;
     
       _rs_x = _filter_rs_x.update(_rs_x);
       _rs_y = _filter_rs_y.update(_rs_y);
-      _rs_theta = _filter_rs_theta.update(_rs_theta);
-      _rs_theta = theta_new;
+      _rs_theta = _filter_rs_theta.update(theta_new);
+      //_rs_theta = theta_new;
       
       _has_rs_update = true;
       //_prev_raw_rs_x = _rs_x;
@@ -801,7 +837,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         // Angles debug
         out["debug"]["theta_enc"] = _debug.theta_enc_only;
         out["debug"]["theta_imu"] = _debug.theta_imu_only;
-        out["debug"]["angles"]["rs_raw"] = _prev_rs_theta_raw;
+        out["debug"]["angles"]["rs_raw"] = raw_rs_theta;
         out["debug"]["angles"]["rs_unwrapped"] = _rs_theta;
         out["debug"]["angles"]["fused"] = _state.x(2);
         out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;

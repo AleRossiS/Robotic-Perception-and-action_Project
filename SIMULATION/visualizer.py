@@ -252,6 +252,13 @@ def main():
                         
                 """
 
+            elif topic == "pose_rs_source":
+                raw_rs_theta = get_nested(data, "/message/pose/attitude/2")
+                
+                # Aggiungi questo Log per vedere l'angolo crudo
+                if raw_rs_theta is not None:
+                     rr.log("debug/RAW_SENSORS/rs_theta", Scalars(raw_rs_theta))
+
             # IMU Data Visualization - GRAPHS
             elif topic == "imu_source":
                 """
