@@ -139,12 +139,12 @@ def main():
                 if "debug" in data:
                     th_enc = data["debug"]["angles"]["theta_enc"]
                     th_imu = data["debug"]["angles"]["theta_imu"]
-                    avg_th_enc_imu = data["debug"]["angles"]["theta_fused_imu_enc"]
+                    #avg_th_enc_imu = data["debug"]["angles"]["theta_fused_imu_enc"]
                     #th_fus = data["debug"].get("theta_fused")
 
                     if th_enc is not None: rr.log("debug/angles/theta_encoder", Scalars(th_enc))
                     if th_imu is not None: rr.log("debug/angles/theta_imu", Scalars(th_imu))
-                    if avg_th_enc_imu is not None: rr.log("debug/angles/theta_fused_imu_enc", Scalars(avg_th_enc_imu))
+                    #if avg_th_enc_imu is not None: rr.log("debug/angles/theta_fused_imu_enc", Scalars(avg_th_enc_imu))
                     
                     #if "theta_enc" in data["debug"]: rr.log("fusion/debug/theta_encoder", Scalars(data["debug"]["theta_enc"]))
                     #if "theta_imu" in data["debug"]: rr.log("fusion/debug/theta_imu", Scalars(data["debug"]["theta_imu"]))
@@ -199,27 +199,27 @@ def main():
                     if is_slipping is not None: rr.log("debug/slip/is_slipping_flag", Scalars(is_slipping))
 
                     # velocity from enc vs imu
-                    vel_enc = data["debug"].get("vel_enc")
-                    vel_imu = data["debug"].get("vel_imu")
+                    #vel_enc = data["debug"].get("vel_enc")
+                    #vel_imu = data["debug"].get("vel_imu")
                     vel_fused = data["debug"].get("fused_velocity")
                     is_slipping = data["debug"].get("is_slipping")
-                    if vel_enc is not None: rr.log("debug/slip/vel_encoder", Scalars(vel_enc))
-                    if vel_imu is not None: rr.log("debug/slip/vel_imu", Scalars(vel_imu))
+                    #if vel_enc is not None: rr.log("debug/slip/vel_encoder", Scalars(vel_enc))
+                    #if vel_imu is not None: rr.log("debug/slip/vel_imu", Scalars(vel_imu))
                     if vel_fused is not None: rr.log("debug/slip/vel_fused", Scalars(vel_fused))
 
-                    ang_rs_raw = get_nested(data, "/debug/angles/rs_raw")
-                    ang_rs_unwrapped = get_nested(data, "/debug/angles/rs_unwrapped")
+                    #ang_rs_raw = get_nested(data, "/debug/angles/rs_raw")
+                    ang_rs = get_nested(data, "/debug/angles/theta_rs")
                     ang_fused = get_nested(data, "/debug/angles/fused_full")
                     ang_fused_partial = get_nested(data, "/debug/angles/fused_partial")
                     #ang_enc_only = get_nested(data, "/debug/angles/enc_only")
-                    ang_ekf_rs = get_nested(data, "/debug/angles/ekf_rs")
+                    #ang_ekf_rs = get_nested(data, "/debug/angles/ekf_rs")
 
-                    if ang_rs_raw is not None: rr.log("debug/angles/rs_raw", Scalars(ang_rs_raw))
-                    if ang_rs_unwrapped is not None: rr.log("debug/angles/rs_unwrapped", Scalars(ang_rs_unwrapped))
+                    #if ang_rs_raw is not None: rr.log("debug/angles/rs_raw", Scalars(ang_rs_raw))
+                    if ang_rs is not None: rr.log("debug/angles/theta_rs", Scalars(ang_rs))
                     if ang_fused is not None: rr.log("debug/angles/fused_full", Scalars(ang_fused))
                     if ang_fused_partial is not None: rr.log("debug/angles/fused_partial", Scalars(ang_fused_partial))
                     #if ang_enc_only is not None: rr.log("debug/angles/enc_only", Scalars(ang_enc_only))
-                    if ang_ekf_rs is not None: rr.log("debug/angles/ekf_rs", Scalars(ang_ekf_rs))
+                    #if ang_ekf_rs is not None: rr.log("debug/angles/ekf_rs", Scalars(ang_ekf_rs))
 
                 """
                 # Ground Truth Trajectory from HTC - GREEN

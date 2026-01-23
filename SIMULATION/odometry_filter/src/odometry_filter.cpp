@@ -196,8 +196,6 @@ class Odometry_filterPlugin : public Filter<json, json> {
     MovingAverage _filter_accel; // Filtro per Accel X
     double _current_gyro_z = 0.0;
     double _current_accel_x = 0.0;
-    //bool _has_gyro = false;
-    //bool _has_imu = false;
 
     double _bias_accel_x = 0.0;
     double _bias_gyro_z = 0.0;
@@ -234,11 +232,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
     bool _has_rs_update = false;
 
     // Variabili interne per debug e calcolo velocità
-    //double est_rs_x = 0.0;
-    //double est_rs_y = 0.0;
-    //double fused_velocity = 0.0;
     double _prev_input_rs_theta = 0.0; 
-    //bool _aruco_valid_for_vis = false;
 
     //htc position
     double _htc_x = 0.0;
@@ -340,23 +334,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
  return_type load_data(const json &in, std::string topic = "") override {
   try {
 
-
-
     // Timecode
     if(in["message"].contains("timecode")){
         _last_timecode = in["message"]["timecode"].get<double>();
-    } //else if (in.contains("/message/timecode")) { //controlla quale viene usato
-        //now = in["/message/timecode"].get<double>();
-    //}
-    //if(now > 0) _last_timecode = now; //controlla aggiornamento timecode per encoder calcolo velocità e acc
+    } 
 
     // Encoders
     if (in["agent_id"].get<string>() == "encoders_source") {
-        //if (in.contains("/message/encoders/left")) {
-        //    _incoming_ticks_l = (long)in["/message/encoders/left"].get<double>();
-        //    _incoming_ticks_r = (long)in["/message/encoders/right"].get<double>();
-        //} 
-        //controlla quale viene usato
+        
             _incoming_ticks_l = (long)in["message"]["encoders"]["left"].get<double>();
             _incoming_ticks_r = (long)in["message"]["encoders"]["right"].get<double>();
         
@@ -383,14 +368,11 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
               _htc_x = pos[0].get<double>();
               _htc_y = pos[1].get<double>();
-              //printf("HTC Position: X: %.3f Y: %.3f\n", _htc_x, _htc_y);
             }
 
             _htc_angle = in["message"]["pose"]["attitude"][2].get<double>();
-            //else{printf("HTC Position data malformed\n");}
           }
         } catch(...){
-          //printf("HTC Position data error\n");
         }
     }  
     
@@ -400,37 +382,23 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       double gx_body = 0.0, gy_body = 0.0, gz_body = 0.0;
       double ax_body = 0.0, ay_body = 0.0, az_body = 0.0;
       
-
       //Gyro
-      //if (in["message"].contains("gyro")) {
         auto& gyro = in["message"]["gyro"];
-        //if (gyro.is_array() && gyro.size() >= 3) {
           double raw_gx = gyro[0].get<double>();
           double raw_gy = gyro[1].get<double>();
           double raw_gz = gyro[2].get<double>();
           
-          // Applicazione matrice di rotazione R = Rx(180) * Rz(-90)
-          // X_new = y_old, Y_new = x_old, Z_new = -z_old
+          // Applicazione matrice di rotazione
           gx_body = raw_gy;
           gy_body = raw_gx;
           gz_body = -raw_gz;
 
-
-        //}
-      //}
-
       // Accel
-      //if (in["message"].contains("accel")) {
         auto& accel = in["message"]["accel"];
-        //if (accel.is_array() && accel.size() >= 1) {
-          // double raw_ax = accel[0].get<double>() * 9.80665; not used
           double raw_ay = accel[1].get<double>() * 9.80665;
-         // double raw_az = accel[2].get<double>() * 9.80665; not used
-          
+
+          // Applicazione matrice di rotazione
           ax_body = raw_ay;
-          // ay_body = raw_ax; not used
-          // az_body = -raw_az; not used
-        //}
       
       // Process IMU Data if both gyro and accel are ready
 
@@ -441,7 +409,6 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
           // Calcolo Accelerazione Angolare (Alpha = dOmega/dt)
           double alpha_x = (gx_body - _prev_gyro_x) / dt_imu;
           double alpha_y = (gy_body - _prev_gyro_y) / dt_imu;
-          //double alpha_z = (gz_body - _prev_gyro_z) / dt_imu; // Non uso
 
           // Vettore Offset (lever arm)
           double rx = _conf.imu_offset_x;
@@ -450,25 +417,16 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
           // Termine tangenziale (Alpha x R)
           double tan_x = alpha_y * rz - gz_body * ry;
-          //double tan_y = gz_body * rx - alpha_x * rz; // Non uso
-          //double tan_z = alpha_x * ry - alpha_y * rx; // Non uso
 
           // Termine centripeto (Omega x (Omega x R))
           // Omega x R
-          //double oxr_x = gy_body * rz - gz_body * ry; // Non uso
           double oxr_y = gz_body * rx - gx_body * rz;
           double oxr_z = gx_body * ry - gy_body * rx;
           // Omega x (Omega x R)
           double cent_x = gy_body * oxr_z - gz_body * oxr_y;
-          //double cent_y = gz_body * oxr_x - gx_body * oxr_z; // Non uso
-          //double cent_z = gx_body * oxr_y - gy_body * oxr_x; // Non uso
-          
+        
           // Correzione finale
-          // a_body = a_measured - a_tangential - a_centripetal
           double ax_corrected = ax_body - tan_x - cent_x;
-
-          // Aggiorna filtro
-          //double val_gyro_z = _conf.invert_gyro ? -gz_body : gz_body;
           
 
           // Accelerometro X
@@ -500,21 +458,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _prev_gyro_z = gz_body;
         _prev_imu_timecode = _last_timecode;
         _first_imu_frame = false;
-        //_has_gyro = true;
-        //_has_imu = true;
       }   
     
 
     // RealSense
-    
-
     if (in["agent_id"].get<string>() == "pose_rs_source") {
       
-      //bool rs_found = false;
       auto& p = in["message"]["pose"];
         // Position
-      //if (p.contains("position") && p.contains("attitude") && p["position"][0].is_array() && p["attitude"][0].is_array()) { //leave this for robustness in case of different formats
-        // Check if it's [[x,y,z]] or [x,y,z]
         if (p["position"][0].is_array()) {
           raw_rs_x = p["position"][0][0].get<double>();
           raw_rs_y = p["position"][0][1].get<double>();
@@ -524,22 +475,12 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         }
 
         // Angle (Handle nested arrays)
-      //if (p.contains("attitude")) {
       if(p["attitude"][0].is_array()){
         raw_rs_theta = p["attitude"][0][2].get<double>();
       } else { // Capisci quale usi
         raw_rs_theta = p["attitude"][2].get<double>();
       }
-      //}
-        //rs_found = true;
-      //} //else{
-        // return message error for format issue
-        //_error = "RealSense pose format error.";
-        //return return_type::error;
-      //}
-
-       // Anti-freeze check & filtering
-    //if (rs_found) {
+ 
 
       double delta_input = raw_rs_theta - _last_input_rs_theta;
 
@@ -552,67 +493,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //_first_rs_frame = true;
       } else {
 
-        /*
       
-      double robot_theta = normalize_angle(_state.x(2));
-      double candidate_rs_theta = normalize_angle(raw_rs_theta +_conf.rs_global_rotation);
-      double angle_diff = candidate_rs_theta - robot_theta;
-
-      while(angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
-      while(angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
-
-      if(angle_diff > M_PI/6.0){
-        raw_rs_theta -= angle_diff;
-      } else if(angle_diff < -M_PI/6.0){
-        raw_rs_theta -= angle_diff;
-      } //else if(angle_diff < -M_PI/10.0 && angle_diff > -M_PI/3.0){
-        //raw_rs_theta += angle_diff;
-      //} else if(angle_diff > M_PI/10.0 && angle_diff < M_PI/3.0){
-        //raw_rs_theta -= angle_diff;
-      //}
-
-
-
-      raw_rs_theta = normalize_angle(raw_rs_theta);
-
-*/
-   
-
-/*
-
-        if(delta_input <= (M_PI + 0.2)&& delta_input >= (M_PI - 0.2) && jump_pos == false && jump_neg == false){ // se angolo salta di pi
-          jump_pos = true;
-          raw_rs_theta -= delta_input;
-        } else if(delta_input <= 0.1 && delta_input >= -0.1 && jump_pos == true){ // se salta e resta sopra di +pi
-          raw_rs_theta -= M_PI;
-        } else if(delta_input >= -(M_PI + 0.2) && delta_input <= -(M_PI - 0.2)&& jump_neg == false && jump_pos == false){//se salta di -pi quando non era già saltato
-          jump_neg = true;
-          raw_rs_theta -= delta_input;
-        } else if(abs(delta_input) <= (M_PI + 0.2) && abs(delta_input)>= (M_PI - 0.2)&& jump_pos == true){ //se salta quando era già saltato in positivo 
-          jump_pos = false;
-        } else if(delta_input <= 0.1 && delta_input >= -0.1 && jump_neg == true){// se salta e resta sotto di -pi
-          raw_rs_theta += M_PI;
-        } else if(abs(delta_input) <= (M_PI + 0.2) && abs(delta_input)>= (M_PI - 0.2)&& jump_neg == true){ //se salta quando era già saltato in negativo
-          jump_neg = false;
-        } else if(delta_input >= -(2*M_PI + 0.2) && delta_input <= -(2*M_PI - 0.2) && jump_pos == true){ // se dal salto di +pi salta a -pi
-          raw_rs_theta += M_PI;
-          jump_pos = false;
-          jump_neg = true;
-        } else if(delta_input <= (2*M_PI + 0.2) && delta_input >= (2*M_PI - 0.2) && jump_neg == true){ // se da -pi salta a +pi
-          raw_rs_theta -= M_PI;
-          jump_neg = false;
-          jump_pos = true;
-        }
-*/
-
-      // TEST
-
-      //double x_new = -raw_rs_x;
-      //double y_new = -raw_rs_y;
-      //double theta_new = raw_rs_theta;
-
-      double correction_rad = 0.0; //Non uso
-      double total_angle = _conf.rs_global_rotation + correction_rad;
+      double total_angle = _conf.rs_global_rotation;
       double cos_rs = cos(total_angle);
       double sin_rs = sin(total_angle);
 
@@ -623,56 +505,17 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
       while(theta_new > M_PI) theta_new -= 2.0 * M_PI;
       while(theta_new < -M_PI) theta_new += 2.0 * M_PI;
-
-      //ipotesi ruotato 180°
-      //raw_rs_theta += M_PI;
-
-
-      //raw_rs_theta = theta_new;
-    
-
-      // Sistema sinistrorso
-      //raw_rs_y = -raw_rs_y;
-      //raw_rs_x = -raw_rs_x;
-      //raw_rs_theta = -raw_rs_theta;
-
-      //double rot = _conf.rs_global_rotation;
-      //double x_new = (raw_rs_x * cos(rot) - raw_rs_y * sin(rot));
-      //double y_new = (raw_rs_x * sin(rot) + raw_rs_y * cos(rot));
-      //double theta_new = raw_rs_theta + rot;
-
-      //raw_rs_x = x_new;
-      //raw_rs_y = y_new;
-      //raw_rs_theta += rot;
-
-      //if(_first_rs_frame){ //Non uso
-      //_rs_theta_unwrapped = raw_rs_theta;
-      //_prev_rs_theta_raw = raw_rs_theta;
-      //_first_rs_frame = false;
-     // }
-
-      //double delta_theta_rs = raw_rs_theta - _prev_rs_theta_raw;
-
-      //double delta_theta_rs = atan2(sin(theta_new - _prev_rs_theta_raw), cos(theta_new - _prev_rs_theta_raw));
-      //_rs_theta_unwrapped += delta_theta_rs;
-
-      //_rs_theta_unwrapped += delta_theta_rs;
-      _prev_rs_theta_raw = theta_new;
-      //raw_rs_theta = raw_rs_theta;
+   
+     
 
       _ekf_theta_rs = theta_new;
-      //while(_ekf_theta_rs > M_PI) _ekf_theta_rs -= 2.0 * M_PI;
-      //while(_ekf_theta_rs < -M_PI) _ekf_theta_rs += 2.0 * M_PI;
     
-      _rs_x = _filter_rs_x.update(_rs_x);
-      _rs_y = _filter_rs_y.update(_rs_y);
-      _rs_theta = _filter_rs_theta.update(theta_new);
-      //_rs_theta = theta_new;
+     // _rs_x = _filter_rs_x.update(_rs_x);
+      //_rs_y = _filter_rs_y.update(_rs_y);
+      //_rs_theta = _filter_rs_theta.update(theta_new);
+      _rs_theta = theta_new;
       
       _has_rs_update = true;
-      //_prev_raw_rs_x = _rs_x;
-      //_prev_raw_rs_y = _rs_y;
-      //_aruco_valid_for_vis = true;
       }
     }
 
@@ -749,7 +592,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
         _prev_time = _last_timecode_enc;
 
-        // --- PREDICTION (Usa Gyroscope!) ---
+        // --- PREDICTION ---
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
         double d_right = (d_ticks_r / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_right;
         double ds = (d_right + d_left) / 2.0;
@@ -757,19 +600,11 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         // calcolo velocità e accelerazione encoder
         double v_enc_raw = ds / dt;
-
-        //_v_enc_smooth = _filter_enc_v.update(v_enc_raw); //Moving average logic
-
-
-      
         _v_enc_smooth = (_conf.alpha_v * v_enc_raw) + ((1.0 - _conf.alpha_v) * _v_enc_smooth); // Low pass filter exponential
 
-        double a_enc_raw = (_v_enc_smooth - _prev_v_enc) / dt;
-        //_a_enc_smooth = _filter_enc_a.update(a_enc_raw); //Moving average logic 
-        
-
-    
+        double a_enc_raw = (_v_enc_smooth - _prev_v_enc) / dt;     
         _a_enc_smooth = (_conf.alpha_a * a_enc_raw) + ((1.0 - _conf.alpha_a) * _a_enc_smooth); // Low pass filter exponential
+
         double a_enc_sma = _filter_enc_a.update(_a_enc_smooth); // Moving average filter
         _prev_v_enc = _v_enc_smooth;
 
@@ -777,20 +612,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _imu_accel_smooth_ema1 = (_conf.alpha_v * _current_accel_x) + ((1.0 - _conf.alpha_v) * _imu_accel_smooth_ema1);
         _imu_accel_smooth_ema2 = (_conf.alpha_a * _imu_accel_smooth_ema1) + ((1.0 - _conf.alpha_a) * _imu_accel_smooth_ema2);
         double a_imu_final = _filter_accel.update(_imu_accel_smooth_ema2);
-        //double a_imu_final= _imu_accel_smooth_ema2;
-        //double a_imu_final = _current_accel_x;
 
         bool is_slipping = false;
-        
-
-        //double min_imu_accel_for_correction = 0.05;
-
-        double v_imu_pred = fused_velocity + (a_imu_final * dt);
+        //double v_imu_pred = fused_velocity + (a_imu_final * dt); non usato nei filtri, inutile
         double accel_diff = abs(a_enc_sma - a_imu_final);
         //double v_diff = abs(v_imu_pred - _v_enc_smooth);
 
-        double var_enc_lin = pow(_conf.sigma_enc_lin, 2);
-        double var_acc_integrated = pow(_conf.sigma_acc * dt, 2);
+        //double var_enc_lin = pow(_conf.sigma_enc_lin, 2); inutilizzato
+        //double var_acc_integrated = pow(_conf.sigma_acc * dt, 2); inutilizzato
         //double K_vel = var_acc_integrated / (var_acc_integrated + var_enc_lin); // guadagno di fusione velocità (quanto mi fido dell'encoder rispetto a IMU)
 
         if(_conf.enable_slip_check && _bias_computed){
@@ -804,7 +633,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
               ds = _prev_ds; //I should leave it as is?
             } else{
-            fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
+            //fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
             double ratio = abs(a_enc_sma) / abs(a_imu_final);
 
             if(ratio > 10) ratio = 10.0; // Limite massimo
@@ -816,7 +645,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
           _prev_ds = ds;
           } else {
             // Nessun slip, usa velocità encoder
-            fused_velocity = _v_enc_smooth;
+           // fused_velocity = _v_enc_smooth;
           }
 
             //ds = v_imu_pred * dt; // Usa velocità IMU predetta
@@ -853,8 +682,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _debug_slip.imu_accel = a_imu_final;
         _debug_slip.is_slipping = is_slipping;
 
-         _debug_slip.enc_vel = _v_enc_smooth;
-        _debug_slip.imu_vel = v_imu_pred;
+        // _debug_slip.enc_vel = _v_enc_smooth;
+        //_debug_slip.imu_vel = v_imu_pred;
 
         
         // rotation encoder
@@ -866,14 +695,13 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         // Rotation gyro
         //double d_theta_gyro = 0.0;
-        //if(_has_gyro){
-            double d_theta_gyro = _current_gyro_z * dt;
-            _debug_angle.angle_imu += d_theta_gyro;
-            while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
-            while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
-        //}
+        double d_theta_gyro = _current_gyro_z * dt;
+        _debug_angle.angle_imu += d_theta_gyro;
+        while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
+        while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
+  
 
-        _debug_angle.avg_imu_enc = (_debug_angle.angle_imu + _debug_angle.angle_enc) / 2.0;
+        //_debug_angle.avg_imu_enc = (_debug_angle.angle_imu + _debug_angle.angle_enc) / 2.0;
 
 
         //Fusione IMU/ENC
@@ -883,8 +711,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         double weight_gyro = var_enc / (var_enc + var_gyro);
         double weight_enc = var_gyro / (var_enc + var_gyro);
         
-        //double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
-        double d_theta_fused = (d_theta_gyro);
+        double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
+        //double d_theta_fused = (d_theta_gyro);
 
         // Calcolo varianze per update PXX
         //incertezza lineare
@@ -909,16 +737,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _state_enc_only.theta = normalize_angle(_state_enc_only.theta + d_theta_enc);
 
         
-
-        // ODOMETRIA + IMU 
-        //double avg_theta_partial = _state_partial.x(2) + d_theta_fused / 2.0;
-        //_state_partial.x(0) += ds * cos(avg_theta_partial);
-        //_state_partial.x(1) += ds * sin(avg_theta_partial);
-        //_state_partial.x(2) = normalize_angle(_state_partial.x(2) + d_theta_fused);
-
         // Correction
         if(_has_rs_update){
-
 
           // Dataset logic
           if(_conf.aruco_is_walker_center){
@@ -944,9 +764,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         }
 
         // OUTPUT
-
         
-
         // Odometry
         out["debug"]["raw_encoder_only"] = std::vector<double>{_state_enc_only.x, _state_enc_only.y, 0.0};
 
@@ -961,20 +779,20 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["accel_enc"] = _debug_slip.enc_accel;
         out["debug"]["accel_imu"] = _debug_slip.imu_accel;
         out["debug"]["is_slipping"] = _debug_slip.is_slipping ? 1.0 : 0.0;
-        out["debug"]["vel_imu"] = _debug_slip.imu_vel;
-        out["debug"]["vel_enc"] = _debug_slip.enc_vel;
-        out["debug"]["fused_velocity"] = fused_velocity;
+        //out["debug"]["vel_imu"] = _debug_slip.imu_vel;
+        //out["debug"]["vel_enc"] = _debug_slip.enc_vel;
+       // out["debug"]["fused_velocity"] = fused_velocity;
 
         // Angles debug
         out["debug"]["angles"]["theta_enc"] = _debug_angle.angle_enc;
         out["debug"]["angles"]["theta_imu"] = _debug_angle.angle_imu;
-        out["debug"]["angles"]["theta_fused_imu_enc"] = _debug_angle.avg_imu_enc;
-        out["debug"]["angles"]["rs_raw"] = raw_rs_theta;
-        out["debug"]["angles"]["rs_unwrapped"] = _rs_theta;
+        //out["debug"]["angles"]["theta_fused_imu_enc"] = _debug_angle.avg_imu_enc;
+        //out["debug"]["angles"]["rs_raw"] = raw_rs_theta; not going to be used anymore
+        out["debug"]["angles"]["theta_rs"] = _rs_theta;
         out["debug"]["angles"]["fused_full"] = _state.x(2);
         out["debug"]["angles"]["fused_partial"] = _state_partial.x(2);
         //out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;
-        out["debug"]["angles"]["ekf_rs"] = _ekf_theta_rs;
+        //out["debug"]["angles"]["ekf_rs"] = _ekf_theta_rs;
 
         //double theta_rs = _rs_theta_unwrapped;
         out["debug"]["rs_center"] = std::vector<double>{est_rs_x, est_rs_y, 0.0};
@@ -1056,8 +874,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     _prev_raw_rs_y = -9999.0;
     //_first_rs_frame = true;
     _rs_theta_unwrapped = 0.0;
-    _prev_rs_theta_raw = 0.0;
-    fused_velocity = 0.0;
+    //_prev_rs_theta_raw = 0.0;
+    //fused_velocity = 0.0;
       
   }
 /*
@@ -1074,7 +892,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 private:
 
   // Define the fields that are used to store internal resources
-  double _prev_rs_theta_raw = 0.0;
+  //double _prev_rs_theta_raw = 0.0;
   double _rs_theta_unwrapped = 0.0;
   //bool _first_rs_frame = true;
 
@@ -1084,7 +902,7 @@ private:
   double est_rs_x = 0.0;
   double est_rs_y = 0.0;
 
-  double fused_velocity = 0.0;
+  //double fused_velocity = 0.0;
   double v_enc = 0.0;
   double v_imu = 0.0;
   double prev_imu_vel = 0.0;
