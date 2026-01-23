@@ -125,37 +125,37 @@ class Odometry_filterPlugin : public Filter<json, json> {
     struct Params {
         double wheel_radius_left = 0.0873;  // RL [m] (Esempio, da calibrare)
         double wheel_radius_right = 0.0857; // RR [m]
-        double baseline = 0.8291;            // B [m] No baseline needed with gyro
-        double ticks_per_rev = 4096.0;     // Risoluzione Encoder
+        double baseline = 0.8291;          // B [m] No baseline needed with gyro
+        double ticks_per_rev = 4096;     // Risoluzione Encoder
 
         // kalman tuning
-        double sigma_v = 0.005;  // vel uncertainty encoder
-        double sigma_w = 0.002; // gyro uncertainty
-        double sigma_rs_pos = 0.8;  // RealSense uncertainty
-        double sigma_rs_ang = 0.5;  // RealSense angle uncertainty
-
-        double sigma_enc_lin = 0.005; // Errore encoder lineare (m/s)
-        double sigma_enc_rot = 0.05;  // Errore encoder rotazionale (rad/s)
-        double sigma_gyro    = 0.002; // Errore giroscopio (rad/s)
+        double sigma_v = 0.05;  // vel uncertainty encoder
+        double sigma_w = 0.05; // gyro uncertainty
+        double sigma_rs_pos = 0.05;  // RealSense uncertainty
+        double sigma_rs_ang = 0.05;  // RealSense angle uncertainty
+        double sigma_acc = 0.065; // accelerometer uncertainty
+        double sigma_enc_lin = 0.05; // Errore encoder lineare (m/s)
+        double sigma_enc_rot = 0.2;  // Errore encoder rotazionale (rad/s)
+        double sigma_gyro = 0.002; // Errore giroscopio (rad/s)
 
         //double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
         double min_imu_accel_for_correction = 0.05;    // Soglia per considerare ferm
-        bool enable_slip_check = true;
+        bool enable_slip_check = false;
         double slip_accel_ratio = 1.5;   // Rapporto accel a_enc / a_imu
-        double alpha_a = 0.10;
+        double alpha_a = 0.15;
         double alpha_v = 0.10;
         double slip_ratio = 1.5;
 
-        int filter_window_rs = 10;
-        int filter_window_imu = 5;  
+        int filter_window_rs = 5;
+        int filter_window_imu = 10;  
         int filter_window_enc = 10; // Finestra per accelerometro    
 
-        double rs_global_rotation = 0.0;
-        double cam_offset_x = 0.80;
-        double cam_offset_y = 0.0;
+        double rs_global_rotation;
+        double cam_offset_x;
+        double cam_offset_y;
         //bool invert_gyro = true;
 
-        bool aruco_is_walker_center = false; //param to know if aruco is at walker center or camera center
+        bool aruco_is_walker_center; //param to know if aruco is at walker center or camera center
 
         // Parametri Offset IMU (Lever Arm) nel frame del Robot
         double imu_offset_x = 0.70;
@@ -163,6 +163,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double imu_offset_z = 0.00;
 
         bool calibration_active = false;
+        double gyro_scaling = 1.005964613;//1798.690728/1788.025845; // scaling factor from calibration
         
     } _conf;
 
@@ -188,14 +189,15 @@ class Odometry_filterPlugin : public Filter<json, json> {
     string _last_agent_id = "";
     double _last_timecode = 0.0;
     double _prev_time = 0.0;
+    double _last_timecode_enc = 0.0;
 
     // IMU Data
     MovingAverage _filter_gyro;
     MovingAverage _filter_accel; // Filtro per Accel X
     double _current_gyro_z = 0.0;
     double _current_accel_x = 0.0;
-    bool _has_gyro = false;
-    bool _has_imu = false;
+    //bool _has_gyro = false;
+    //bool _has_imu = false;
 
     double _bias_accel_x = 0.0;
     double _bias_gyro_z = 0.0;
@@ -206,7 +208,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _imu_accel_smooth_ema1 = 0.0;
     double _imu_accel_smooth_ema2 = 0.0;
 
-    double gyro_scaling = 1.005964613;//1798.690728/1788.025845; // scaling factor from calibration
+    
 
     // Mem per calcolare derivata angolare
     double _prev_gyro_x = 0.0;
@@ -264,9 +266,9 @@ public:
   }
 
   Odometry_filterPlugin() : 
-    _filter_rs_x(5), //Should not be too big
-    _filter_rs_y(5), //Should not be too big
-    _filter_rs_theta(5), //Should not be too big
+    _filter_rs_x(_conf.filter_window_rs), //Should not be too big
+    _filter_rs_y(_conf.filter_window_rs), //Should not be too big
+    _filter_rs_theta(_conf.filter_window_rs), //Should not be too big
     _filter_gyro(_conf.filter_window_imu), //Aumento?
     _filter_accel(_conf.filter_window_imu),//Aumento?
     //_filter_enc_v(10),
@@ -339,6 +341,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
   try {
 
 
+
     // Timecode
     if(in["message"].contains("timecode")){
         _last_timecode = in["message"]["timecode"].get<double>();
@@ -362,9 +365,11 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             _prev_ticks_l = _incoming_ticks_l;
             _prev_ticks_r = _incoming_ticks_r;
             _prev_time = _last_timecode;
+            _last_timecode_enc = _last_timecode;
             _initialized = true;
         } else {
             _has_new_encoder_data = true;
+            _last_timecode_enc = _last_timecode;
         }
     }
 
@@ -481,8 +486,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             }
           } else {
             _current_accel_x = ax_corrected - _bias_accel_x;
-            //_current_gyro_z = _filter_gyro.update(gz_body * gyro_scaling - _bias_gyro_z);
-            _current_gyro_z = gz_body * gyro_scaling - _bias_gyro_z;
+            //_current_gyro_z = _filter_gyro.update(gz_body * gyro_scaling - _bias_gyro_z); 
+            _current_gyro_z = (gz_body - _bias_gyro_z)* _conf.gyro_scaling;
 
             
         }
@@ -495,8 +500,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _prev_gyro_z = gz_body;
         _prev_imu_timecode = _last_timecode;
         _first_imu_frame = false;
-        _has_gyro = true;
-        _has_imu = true;
+        //_has_gyro = true;
+        //_has_imu = true;
       }   
     
 
@@ -731,7 +736,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             return return_type::success; // O warning,
         }
 
-        double current_dt = _last_timecode - _prev_time;
+        double current_dt = _last_timecode_enc - _prev_time;
         if(current_dt <= 0.01) return return_type::success; // Evita calcoli inutili
 
         long d_ticks_l = _incoming_ticks_l - _prev_ticks_l;
@@ -742,7 +747,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         double dt = current_dt;
         if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
-        _prev_time = _last_timecode;
+        _prev_time = _last_timecode_enc;
 
         // --- PREDICTION (Usa Gyroscope!) ---
         double d_left = (d_ticks_l / _conf.ticks_per_rev) * 2.0 * M_PI * _conf.wheel_radius_left;
@@ -776,43 +781,74 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //double a_imu_final = _current_accel_x;
 
         bool is_slipping = false;
+        
 
         //double min_imu_accel_for_correction = 0.05;
 
         double v_imu_pred = fused_velocity + (a_imu_final * dt);
         double accel_diff = abs(a_enc_sma - a_imu_final);
-        double v_diff = abs(v_imu_pred - _v_enc_smooth);
+        //double v_diff = abs(v_imu_pred - _v_enc_smooth);
 
-        if(_conf.enable_slip_check && _bias_computed && accel_diff > 1){
+        double var_enc_lin = pow(_conf.sigma_enc_lin, 2);
+        double var_acc_integrated = pow(_conf.sigma_acc * dt, 2);
+        //double K_vel = var_acc_integrated / (var_acc_integrated + var_enc_lin); // guadagno di fusione velocità (quanto mi fido dell'encoder rispetto a IMU)
+
+        if(_conf.enable_slip_check && _bias_computed){
             // 2. Acceleration Mismatch (Burnout Check)
             // Se gli encoder dicono "Partenza a razzo" (alta accel)
             // Ma l'IMU dice "Movimento blando"
           
 
-          //if (_conf.slip_ratio * abs(a_enc_sma) > abs(a_imu_final)){
+          if (accel_diff > 0.5){
             is_slipping = true; // Rilevato slip
+            if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
+              ds = _prev_ds; //I should leave it as is?
+            } else{
             fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
-        } else{
-          fused_velocity = (0.9 * _v_enc_smooth) + (0.1 * v_imu_pred); // Nessun slip, usa velocità encoder
-        }
+            double ratio = abs(a_enc_sma) / abs(a_imu_final);
 
-        ds = fused_velocity * dt;
-            
-        //if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
-          //    ds = _prev_ds;
-           // } else{
-           // double ratio = abs(a_enc_sma) / abs(a_imu_final);
-
-            //if(ratio > 10) ratio = 10.0; // Limite massimo
+            if(ratio > 10) ratio = 10.0; // Limite massimo
+            if(ratio < 0.1) ratio = 0.1; // Limite minimo
             //SE ACCELERAZIONE ~0 DS = PREV_DS
 
-           // ds = _conf.slip_ratio * ds / ratio;
-            //}
-            //_prev_ds = ds;
-          //}
-          
-        //}
+            ds = ds / ratio;
+            }
+          _prev_ds = ds;
+          } else {
+            // Nessun slip, usa velocità encoder
+            fused_velocity = _v_enc_smooth;
+          }
 
+            //ds = v_imu_pred * dt; // Usa velocità IMU predetta
+            //fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
+        } //else{
+
+          // Fusione velocità ricalcolando i pesi in base alle varianze
+          //double w_enc = var_acc_integrated / (var_acc_integrated + var_enc_lin);
+          //double w_tot = (1.0/var_enc_lin) + (1.0/var_acc_integrated);
+          //double k_enc = (1.0/var_enc_lin) / w_tot;
+          //double k_imu = (1.0/var_acc_integrated) / w_tot;
+
+          //fused_velocity = (k_enc * _v_enc_smooth) + (k_imu * v_imu_pred); // Nessun slip, usa velocità encoder
+          //fused_velocity = ds/dt;
+        //}
+          
+        /*
+        if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
+              //ds = _prev_ds; I should leave it as is?
+            } else{
+            double ratio = abs(a_enc_sma) / abs(a_imu_final);
+
+            if(ratio > 10) ratio = 10.0; // Limite massimo
+            //SE ACCELERAZIONE ~0 DS = PREV_DS
+
+            ds = _conf.slip_ratio * ds / ratio;
+            }
+          _prev_ds = ds;
+          }
+          
+        }
+*/
         _debug_slip.enc_accel = a_enc_sma;
         _debug_slip.imu_accel = a_imu_final;
         _debug_slip.is_slipping = is_slipping;
@@ -829,13 +865,13 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         while(_debug_angle.angle_enc < -M_PI) _debug_angle.angle_enc += 2.0 * M_PI;
 
         // Rotation gyro
-        double d_theta_gyro = 0.0;
-        if(_has_gyro){
-            d_theta_gyro = _current_gyro_z * dt;
+        //double d_theta_gyro = 0.0;
+        //if(_has_gyro){
+            double d_theta_gyro = _current_gyro_z * dt;
             _debug_angle.angle_imu += d_theta_gyro;
             while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
             while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
-        }
+        //}
 
         _debug_angle.avg_imu_enc = (_debug_angle.angle_imu + _debug_angle.angle_enc) / 2.0;
 
@@ -843,21 +879,23 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //Fusione IMU/ENC
         double var_enc = _conf.sigma_enc_rot * _conf.sigma_enc_rot;
         double var_gyro = _conf.sigma_gyro * _conf.sigma_gyro;
-
-        double weight_gyro = 0.0;
-        double weight_enc = 1.0;
-        if(_has_gyro){
-            weight_gyro = var_enc / (var_enc + var_gyro);
-            weight_enc = var_gyro / (var_enc + var_gyro);
-        }
-
-        double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
+        
+        double weight_gyro = var_enc / (var_enc + var_gyro);
+        double weight_enc = var_gyro / (var_enc + var_gyro);
+        
+        //double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
+        double d_theta_fused = (d_theta_gyro);
 
         // Calcolo varianze per update PXX
-        double sigma_curr = is_slipping ? 0.25 : _conf.sigma_v; // Aumenta incertezza se slittamento
-        double sigma_ds = sigma_curr * abs(ds) + 0.001; // Evita zero
-        double combined_sigma = sqrt(pow(_conf.sigma_gyro * weight_gyro, 2) + pow(_conf.sigma_enc_rot * weight_enc, 2));
-        double sigma_dtheta = combined_sigma * abs(d_theta_fused) + 0.001; // Evita zero
+        //incertezza lineare
+        double motion_error_lin = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento
+        double sigma_ds = (motion_error_lin * abs(ds)) + (0.01*dt); // % del movimento + drift temporale
+
+        // incertezza angolare
+        //double combined_sigma = sqrt(pow(_conf.sigma_gyro * weight_gyro, 2) + pow(_conf.sigma_enc_rot * weight_enc, 2));
+        double motion_error_ang = _conf.sigma_w;
+        double sigma_dtheta = (motion_error_ang * abs(d_theta_fused)) + (0.01*dt); // come caso lineare
+        // viene aggiunto (0.01*dt) per evitare varianza nulla in caso di movimento zero. In questo modo aggiorniamo la matrice P aumentando l'incertezza nel tempo, rivelando eventuali errori di deriva.
 
         ekf_predict(_state, ds, d_theta_fused, sigma_ds, sigma_dtheta);
         ekf_predict(_state_partial, ds, d_theta_fused, sigma_ds, sigma_dtheta);
@@ -965,34 +1003,30 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if (p.contains("baseline")) _conf.baseline = p["baseline"];
     if (p.contains("ticks_per_rev")) _conf.ticks_per_rev = p["ticks_per_rev"];
 
+
+    if(p.contains("sigma_v")) _conf.sigma_v = p["sigma_v"];
+    if(p.contains("sigma_w")) _conf.sigma_w = p["sigma_w"];
+    if(p.contains("sigma_acc")) _conf.sigma_acc = p["sigma_acc"];
     if(p.contains("sigma_enc_lin")) _conf.sigma_enc_lin = p["sigma_enc_lin"];
     if(p.contains("sigma_enc_rot")) _conf.sigma_enc_rot = p["sigma_enc_rot"];
     if(p.contains("sigma_gyro")) _conf.sigma_gyro = p["sigma_gyro"];
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
     if(p.contains("sigma_rs_ang")) _conf.sigma_rs_ang = p["sigma_rs_ang"];
+    
     if(p.contains("alpha_a")) _conf.alpha_a = p["alpha_a"];
     if(p.contains("alpha_v")) _conf.alpha_v = p["alpha_v"];
     if(p.contains("slip_ratio")) _conf.slip_ratio = p["slip_ratio"];
-
-    //if (p.contains("filter_window_rs")) { // probabilmente inutile
-    //        _conf.filter_window_rs = p["filter_window_rs"];
-    //        _filter_rs_x.resize(_conf.filter_window_rs);
-    //        _filter_rs_y.resize(_conf.filter_window_rs);
-    // }
-
-    //if (p.contains("filter_window_imu")) { // probabilmente inutile
-    //  _conf.filter_window_imu = p["filter_window_imu"];
-    //  _filter_gyro.resize(_conf.filter_window_imu);
-    //  _filter_accel.resize(_conf.filter_window_acc);
-    //}
-
+ 
     
 
     if( p.contains("cam_offset_x")) _conf.cam_offset_x = p["cam_offset_x"];
     if( p.contains("cam_offset_y")) _conf.cam_offset_y = p["cam_offset_y"];
+
     if( p.contains("rs_global_rotation")) _conf.rs_global_rotation = p["rs_global_rotation"];
+
     if( p.contains("filter_window_imu")) _conf.filter_window_imu = p["filter_window_imu"];
     if( p.contains("filter_window_enc")) _conf.filter_window_enc = p["filter_window_enc"];
+    if(p.contains("filter_window_rs")) _conf.filter_window_rs = p["filter_window_rs"];
     //if( p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
 
     //if (p.contains("slip_accel_thresh")) _conf.slip_accel_thresh = p["slip_accel_thresh"];
@@ -1003,6 +1037,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if(p.contains("aruco_is_walker_center")) _conf.aruco_is_walker_center = p["aruco_is_walker_center"];
 
     if(p.contains("calibration_active")) _conf.calibration_active = p["calibration_active"];
+    if(p.contains("gyro_scaling")) _conf.gyro_scaling = p["gyro_scaling"];
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
@@ -1121,13 +1156,13 @@ int main() {
     f.process(out); 
 
     // Test Movimento
-    in["encoders"]["left"] = 100;
-    in["encoders"]["right"] = 100;
+    //in["encoders"]["left"] = 100;
+    //in["encoders"]["right"] = 100;
     
-    f.load_data(in);
-    f.process(out);
+    //f.load_data(in);
+    //f.process(out);
 
-    std::cout << "Pose: " << out.dump(4) << std::endl;
+   // std::cout << "Pose: " << out.dump(4) << std::endl;
     return 0;
 }
 
