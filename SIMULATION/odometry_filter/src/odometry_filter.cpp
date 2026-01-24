@@ -150,9 +150,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
         int filter_window_imu = 10;  
         int filter_window_enc = 10; // Finestra per accelerometro    
 
-        double rs_global_rotation;
-        double cam_offset_x;
-        double cam_offset_y;
+        double rs_global_rotation = 0.0;
+        double cam_offset_x = 0.0;
+        double cam_offset_y = 0.0;
         //bool invert_gyro = true;
 
         bool aruco_is_walker_center; //param to know if aruco is at walker center or camera center
@@ -487,38 +487,60 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
       _last_input_rs_theta = raw_rs_theta;
 
       if(abs(delta_input) < 1e-6){ // semplicemente salta il dato se uguale al precedente o salta
-        _filter_rs_x.clear(); //Non uso
-        _filter_rs_y.clear();//Non uso
-        _filter_rs_theta.clear();//Non uso
+        //_filter_rs_x.clear(); //Non uso
+        //_filter_rs_y.clear();//Non uso
+        //_filter_rs_theta.clear();//Non uso
         //_first_rs_frame = true;
       } else {
 
+      // Dataset logic
+          if(_conf.aruco_is_walker_center){
+            _rs_x = raw_rs_x;
+            _rs_y = raw_rs_y;
+            _rs_theta = normalize_angle(raw_rs_theta);
+            
+            
+          }else{
+            _rs_theta = normalize_angle(raw_rs_theta + _conf.rs_global_rotation);
+
+            _rs_x = raw_rs_x * cos(_conf.rs_global_rotation) - raw_rs_y * sin(_conf.rs_global_rotation);
+            _rs_y = raw_rs_x * sin(_conf.rs_global_rotation) + raw_rs_y * cos(_conf.rs_global_rotation);
+          
+            _rs_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
+            _rs_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
+
+            _ekf_theta_rs = normalize_angle(raw_rs_theta);
+          }
+
       
-      double total_angle = _conf.rs_global_rotation;
-      double cos_rs = cos(total_angle);
-      double sin_rs = sin(total_angle);
+      //double total_angle = _conf.rs_global_rotation;
+      //double cos_rs = cos(total_angle);
+      //double sin_rs = sin(total_angle);
 
-      _rs_x = (raw_rs_x * cos_rs - raw_rs_y * sin_rs);
-      _rs_y = (raw_rs_x * sin_rs + raw_rs_y * cos_rs);
+      //_rs_x = (raw_rs_x * cos_rs - raw_rs_y * sin_rs);
+      //_rs_y = (raw_rs_x * sin_rs + raw_rs_y * cos_rs);
 
-      double theta_new = raw_rs_theta + total_angle;
+      //double theta_new = raw_rs_theta + total_angle;
 
-      while(theta_new > M_PI) theta_new -= 2.0 * M_PI;
-      while(theta_new < -M_PI) theta_new += 2.0 * M_PI;
+      //theta_new = normalize_angle(theta_new);
+
+      //while(theta_new > M_PI) theta_new -= 2.0 * M_PI;
+      //while(theta_new < -M_PI) theta_new += 2.0 * M_PI;
    
      
 
-      _ekf_theta_rs = theta_new;
+      //_ekf_theta_rs = theta_new;
     
      // _rs_x = _filter_rs_x.update(_rs_x);
       //_rs_y = _filter_rs_y.update(_rs_y);
       //_rs_theta = _filter_rs_theta.update(theta_new);
-      _rs_theta = theta_new;
+      //_rs_theta = theta_new;
       
       _has_rs_update = true;
       }
     }
 
+    // This next section is only used for the calibration with the uncertainty dataset
     if(_conf.calibration_active == true){
 
       
@@ -690,15 +712,18 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         double d_theta_enc = (d_right - d_left) / _conf.baseline;
         _debug_angle.angle_enc += d_theta_enc;
 
-        while(_debug_angle.angle_enc > M_PI) _debug_angle.angle_enc -= 2.0 * M_PI;
-        while(_debug_angle.angle_enc < -M_PI) _debug_angle.angle_enc += 2.0 * M_PI;
+        _debug_angle.angle_enc = normalize_angle(_debug_angle.angle_enc);
+
+        //while(_debug_angle.angle_enc > M_PI) _debug_angle.angle_enc -= 2.0 * M_PI;
+        //while(_debug_angle.angle_enc < -M_PI) _debug_angle.angle_enc += 2.0 * M_PI;
 
         // Rotation gyro
         //double d_theta_gyro = 0.0;
         double d_theta_gyro = _current_gyro_z * dt;
         _debug_angle.angle_imu += d_theta_gyro;
-        while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
-        while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
+        _debug_angle.angle_imu = normalize_angle(_debug_angle.angle_imu);
+        //while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
+        //while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
   
 
         //_debug_angle.avg_imu_enc = (_debug_angle.angle_imu + _debug_angle.angle_enc) / 2.0;
@@ -739,19 +764,9 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         
         // Correction
         if(_has_rs_update){
-
-          // Dataset logic
-          if(_conf.aruco_is_walker_center){
-            est_rs_x = _rs_x;
-            est_rs_y = _rs_y;
-          }else{
-          
-          est_rs_x = _rs_x + (cos(_rs_theta) * _conf.cam_offset_x - sin(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_x;
-          est_rs_y = _rs_y + (sin(_rs_theta) * _conf.cam_offset_x + cos(_rs_theta) * _conf.cam_offset_y) + _conf.cam_offset_y;
-          }
           
           Vector3d Z;
-          Z << est_rs_x, est_rs_y, _ekf_theta_rs;
+          Z << _rs_x, _rs_y, _ekf_theta_rs;
 
           Matrix3d R = Matrix3d::Zero();
           R(0, 0) = _conf.sigma_rs_pos * _conf.sigma_rs_pos;
@@ -788,14 +803,14 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["angles"]["theta_imu"] = _debug_angle.angle_imu;
         //out["debug"]["angles"]["theta_fused_imu_enc"] = _debug_angle.avg_imu_enc;
         //out["debug"]["angles"]["rs_raw"] = raw_rs_theta; not going to be used anymore
-        out["debug"]["angles"]["theta_rs"] = _rs_theta;
+        out["debug"]["angles"]["theta_rs"] = _ekf_theta_rs;
         out["debug"]["angles"]["fused_full"] = _state.x(2);
         out["debug"]["angles"]["fused_partial"] = _state_partial.x(2);
         //out["debug"]["angles"]["enc_only"] = _state_enc_only.theta;
         //out["debug"]["angles"]["ekf_rs"] = _ekf_theta_rs;
 
         //double theta_rs = _rs_theta_unwrapped;
-        out["debug"]["rs_center"] = std::vector<double>{est_rs_x, est_rs_y, 0.0};
+        out["debug"]["rs_center"] = std::vector<double>{_rs_x, _rs_y, 0.0};
 
         //htc position
         out["debug"]["htc_position"] = std::vector<double>{_htc_x, _htc_y, 0.0};
