@@ -43,12 +43,6 @@ using namespace Eigen;
 using namespace std;
 using json = nlohmann::json;
 
-// Normalizzazione angoli
-double normalize_angle(double angle) {
-    while (angle > M_PI) angle -= 2.0 * M_PI;
-    while (angle < -M_PI) angle += 2.0 * M_PI;
-    return angle;
-}
 
 //MAth consts
 #ifndef M_PI
@@ -164,6 +158,8 @@ class Odometry_filterPlugin : public Filter<json, json> {
 
         bool calibration_active = false;
         double gyro_scaling = 1.005964613;//1798.690728/1788.025845; // scaling factor from calibration
+
+        bool htc = false; // if true, use htc for error estimation
         
     } _conf;
 
@@ -238,6 +234,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _htc_x = 0.0;
     double _htc_y = 0.0;
     double _htc_angle = 0.0;
+    bool htc_data = false;
 
     std::vector<double> _calib_acc_x;
     std::vector<double> _calib_acc_y;
@@ -245,6 +242,20 @@ class Odometry_filterPlugin : public Filter<json, json> {
     std::vector<double> _calib_rs_x;
     std::vector<double> _calib_rs_y;
     std::vector<double> _calib_rs_theta;
+
+
+    // Error estimation from real value
+    double _sum_err_dist_sq = 0.0;
+    double _sum_err_theta_sq = 0.0;
+    double _sum_err_dist = 0.0;
+    double _sum_err_theta = 0.0;
+    long _samples = 0;
+    double err_dist = 0.0;
+    double err_theta = 0.0;
+    double rmse_dist = 0.0;
+    double rmse_theta = 0.0;
+    double std_dist = 0.0;
+
 
    
 
@@ -311,6 +322,13 @@ void ekf_predict(State &s, double ds, double d_theta, double sigma_ds, double si
     return sqrt(standardDeviation / data.size());
   }
 
+  // Normalizzazione angoli
+double normalize_angle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+
 // --- FUNZIONE DI CORREZIONE EKF (UPDATE) ---
 void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
   // Z = Misura [x, y, theta]
@@ -371,6 +389,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             }
 
             _htc_angle = in["message"]["pose"]["attitude"][2].get<double>();
+
+            htc_data = true;
           }
         } catch(...){
         }
@@ -498,6 +518,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             _rs_x = raw_rs_x;
             _rs_y = raw_rs_y;
             _rs_theta = normalize_angle(raw_rs_theta);
+            _ekf_theta_rs = _rs_theta;
             
             
           }else{
@@ -778,6 +799,33 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
           _has_rs_update = false;
         }
 
+
+        // Error estimation (only for dataset with ground truth)
+        if(_bias_computed && _conf.htc && htc_data){
+          double dx = _state.x(0) - _htc_x;
+          double dy = _state.x(1) - _htc_y;
+          err_dist = sqrt(dx*dx + dy*dy); //dist error [m]
+          err_theta = normalize_angle(_state.x(2) - _htc_angle); // angle error [rad]
+
+          _sum_err_dist += err_dist;
+          _sum_err_theta += err_theta;
+          _sum_err_dist_sq += err_dist * err_dist;
+          _sum_err_theta_sq += err_theta * err_theta;
+          _samples ++;
+
+          double mean_dist = _sum_err_dist / _samples;
+          double mean_theta = _sum_err_theta / _samples;
+
+          rmse_dist = sqrt(_sum_err_dist_sq / _samples);
+          rmse_theta = sqrt(_sum_err_theta_sq / _samples);
+
+          double var_dist = (_sum_err_dist_sq / _samples) - (mean_dist * mean_dist);
+          std_dist = sqrt(std::max(0.0, var_dist)); // max to avoid sqrt(-0.00)
+
+
+          htc_data = false;
+        }
+
         // OUTPUT
         
         // Odometry
@@ -815,6 +863,19 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //htc position
         out["debug"]["htc_position"] = std::vector<double>{_htc_x, _htc_y, 0.0};
         out["debug"]["angles"]["htc_angle"] = _htc_angle;
+
+
+        // Error stats
+        out["evaluation"]["current_error_dist"] = err_dist;
+        out["evaluation"]["rmse_dist"] = rmse_dist;
+        out["evaluation"]["std_dist"] = std_dist;
+
+        out["evaluation"]["current_error_theta"] = err_theta;
+        out["evaluation"]["rmse_theta"] = rmse_theta;
+
+        if(_samples % 200 == 0 && _samples > 0){
+          std::cout << "[METRICS] RMSE Dist: " << rmse_dist << " m | RMSE Theta: " << rmse_theta << " rad" << std::endl;
+        }
         
         if (!_last_agent_id.empty()) out["source_id"] = _last_agent_id;
         out["sim_time"] = _last_timecode;
@@ -871,6 +932,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
     if(p.contains("calibration_active")) _conf.calibration_active = p["calibration_active"];
     if(p.contains("gyro_scaling")) _conf.gyro_scaling = p["gyro_scaling"];
+
+    if(p.contains("htc")) _conf.htc = p["htc"];
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
