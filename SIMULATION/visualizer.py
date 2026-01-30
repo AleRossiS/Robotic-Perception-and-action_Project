@@ -102,6 +102,14 @@ def main():
                 if "debug" in data:
                     th_enc = data["debug"]["angles"]["theta_enc"]
                     th_imu = data["debug"]["angles"]["theta_imu"]
+                    th_diff = data["debug"].get("angle_diff")
+                    if th_diff is not None: rr.log("debug/slip/angle_diff", Scalars(th_diff))
+                    th_ratio = data["debug"].get("angle_ratio")
+                    if th_ratio is not None: rr.log("debug/slip/angle_ratio", Scalars(th_ratio))
+                    d_th_enc = data["debug"].get("d_theta_enc")
+                    d_th_imu = data["debug"].get("d_theta_imu")
+                    if d_th_enc is not None: rr.log("debug/slip/d_theta_encoder", Scalars(d_th_enc))
+                    if d_th_imu is not None: rr.log("debug/slip/d_theta_imu", Scalars(d_th_imu))
                     #avg_th_enc_imu = data["debug"]["angles"]["theta_fused_imu_enc"]
                     #th_fus = data["debug"].get("theta_fused")
 

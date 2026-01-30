@@ -73,6 +73,11 @@ public:
         if(_window.empty()) return 0.0;
         return _sum / _window.size();
     }
+
+    double current_value() const {
+        if(_window.empty()) return 0.0;
+        return _sum / _window.size();
+    }
 };
 
 
@@ -106,6 +111,11 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double enc_vel = 0.0;
         double imu_vel = 0.0;
         bool is_slipping = false; 
+
+        double angle_diff = 0.0;
+        double angle_ratio = 0.0;
+        double d_theta_enc = 0.0;
+        double d_theta_imu = 0.0;
     } _debug_slip;
 
     struct DebugAngle{
@@ -181,6 +191,7 @@ class Odometry_filterPlugin : public Filter<json, json> {
 
     //MovingAverage _filter_enc_v; // Rimosso, uso filtro esponenziale inline
     MovingAverage _filter_enc_a; // filtro ibrido per accelerazione encoder
+    MovingAverage _filter_enc_theta; // filtro per velocità angolare encoder
 
     string _last_agent_id = "";
     double _last_timecode = 0.0;
@@ -277,7 +288,8 @@ public:
     _filter_gyro(_conf.filter_window_imu), //Aumento?
     _filter_accel(_conf.filter_window_imu),//Aumento?
     //_filter_enc_v(10),
-    _filter_enc_a(_conf.filter_window_enc)//Aumento?
+    _filter_enc_a(_conf.filter_window_enc),//Aumento?
+    _filter_enc_theta(10)
     {}
   
   // -- Funzione di predizione EKF
@@ -310,7 +322,7 @@ void ekf_predict(State &s, double ds, double d_theta, double sigma_ds, double si
   // PREDIZIONE COVARIANZA: P = F * P * F^T + Q
   s.P = (F * s.P * F.transpose()) + Q;
 
-}
+}  // rivedere incertezza dello stato, ad ogni stato l'incertezza deve essere aggiornata!!!
 
 // calculate std deviation
   double std_dev(const std::vector<double>& data) {
@@ -665,35 +677,97 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         //double var_acc_integrated = pow(_conf.sigma_acc * dt, 2); inutilizzato
         //double K_vel = var_acc_integrated / (var_acc_integrated + var_enc_lin); // guadagno di fusione velocità (quanto mi fido dell'encoder rispetto a IMU)
 
+        // rotation encoder
+        double d_theta_enc = (d_right - d_left) / _conf.baseline;
+        _debug_angle.angle_enc += d_theta_enc;
+
+        _debug_angle.angle_enc = normalize_angle(_debug_angle.angle_enc);
+
+        //while(_debug_angle.angle_enc > M_PI) _debug_angle.angle_enc -= 2.0 * M_PI;
+        //while(_debug_angle.angle_enc < -M_PI) _debug_angle.angle_enc += 2.0 * M_PI;
+
+        // Rotation gyro
+        //double d_theta_gyro = 0.0;
+        double d_theta_gyro = _current_gyro_z * dt;
+        _debug_angle.angle_imu += d_theta_gyro;
+        _debug_angle.angle_imu = normalize_angle(_debug_angle.angle_imu);
+
+        //double dtheta_diff = abs(d_theta_enc - d_theta_gyro);
+
+        double angle_ratio = 1.0;
+        _filter_enc_theta.update(d_theta_enc);
+        _filter_gyro.update(d_theta_gyro);
+
+        if(abs(_filter_gyro.current_value()) > 0.001 && abs(_filter_enc_theta.current_value()) > 0.001){ // calcolo rapporto angoli rilevati
+              angle_ratio = abs(_filter_enc_theta.current_value()) / abs(_filter_gyro.current_value());
+        }
+
+
         if(_conf.enable_slip_check && _bias_computed){
-            // 2. Acceleration Mismatch (Burnout Check)
-            // Se gli encoder dicono "Partenza a razzo" (alta accel)
-            // Ma l'IMU dice "Movimento blando"
+            // controllo slippaggio: le condizioni potrebbero essere:
+            // uno degli encoder scivola in curva -> differenza angolare alta
+            // entrambi gli encoder slittano in rettilineo -> differenza accelerazione alta         
           
+          if (_conf.enable_slip_check && abs(1.0 - angle_ratio) > 0.2) {    
+                
+                // CORREZIONE GEOMETRICA
+                // Se ho girato la metà di quanto dicono le ruote, ho percorso anche la metà della strada.
+                // Scaliamo ds in proporzione.
+                
+                // Saturazione di sicurezza (per evitare correzioni esplosive)
+                if (angle_ratio < 0.5) angle_ratio = 0.5;
+                if (angle_ratio > 1.5) angle_ratio = 1.5;
 
-          if (accel_diff > 0.5){
-            is_slipping = true; // Rilevato slip
-            if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
-              ds = _prev_ds; //I should leave it as is?
-            } else{
-            //fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
-            double ratio = abs(a_enc_sma) / abs(a_imu_final);
-
-            if(ratio > 10) ratio = 10.0; // Limite massimo
-            if(ratio < 0.1) ratio = 0.1; // Limite minimo
-            //SE ACCELERAZIONE ~0 DS = PREV_DS
-
-            ds = ds / ratio;
+                ds = ds / angle_ratio;
+                _prev_ds = ds;
             }
-          _prev_ds = ds;
-          } else {
+
+        // --- RAMO 2: SIAMO IN RETTILINEO? ---
+        else {
+            // In rettilineo, la geometria non aiuta (angoli ~0).
+            // Qui dobbiamo usare le accelerazioni.
+            
+            double accel_diff = abs(a_enc_sma - a_imu_final);
+            
+            // Soglia conservativa (es. 1.0 m/s^2)
+            bool slip_linear = (accel_diff > 0.4); 
+
+            if (_conf.enable_slip_check && _bias_computed && slip_linear) {
+                
+                // CORREZIONE INERZIALE
+                // Le ruote stanno sgommando (partenza) o scivolando (frenata).
+                // Ignoriamo l'encoder.
+                
+                // Opzione A: Integrazione Inerziale (più rischiosa ma reattiva)
+                // double v_pred = _fused_velocity + (a_imu_final * dt);
+                // ds_final = v_pred * dt;
+                // _fused_velocity = v_pred;
+                if(abs(a_imu_final) < _conf.min_imu_accel_for_correction){
+                    ds = _prev_ds; // Se l'accelerazione IMU è troppo bassa, mantieni la velocità precedente
+                }
+                double ratio = abs(a_enc_sma) / abs(a_imu_final);
+                if(ratio > 10) ratio = 10.0; // Limite massimo
+                if(ratio < 0.1) ratio = 0.1; // Limite minimo
+
+                // Opzione B: Zero Order Hold (Manteniamo velocità precedente) - Più sicura
+                ds = ds / ratio; 
+                is_slipping = true;
+                _prev_ds = ds;
+            } 
+            else {
+                
+                _prev_ds = ds;
+            }
+        }
+      }
+
+          
             // Nessun slip, usa velocità encoder
            // fused_velocity = _v_enc_smooth;
-          }
 
             //ds = v_imu_pred * dt; // Usa velocità IMU predetta
             //fused_velocity = v_imu_pred; // Aggiorna velocità fusa basata su IMU
-        } //else{
+        //} else{
 
           // Fusione velocità ricalcolando i pesi in base alle varianze
           //double w_enc = var_acc_integrated / (var_acc_integrated + var_enc_lin);
@@ -724,25 +798,16 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _debug_slip.enc_accel = a_enc_sma;
         _debug_slip.imu_accel = a_imu_final;
         _debug_slip.is_slipping = is_slipping;
+        _debug_slip.angle_diff = _filter_enc_theta.current_value() - _filter_gyro.current_value();
+        _debug_slip.angle_ratio = angle_ratio;
+        _debug_slip.d_theta_enc = _filter_enc_theta.current_value();
+        _debug_slip.d_theta_imu = _filter_gyro.current_value();
 
         // _debug_slip.enc_vel = _v_enc_smooth;
         //_debug_slip.imu_vel = v_imu_pred;
 
         
-        // rotation encoder
-        double d_theta_enc = (d_right - d_left) / _conf.baseline;
-        _debug_angle.angle_enc += d_theta_enc;
-
-        _debug_angle.angle_enc = normalize_angle(_debug_angle.angle_enc);
-
-        //while(_debug_angle.angle_enc > M_PI) _debug_angle.angle_enc -= 2.0 * M_PI;
-        //while(_debug_angle.angle_enc < -M_PI) _debug_angle.angle_enc += 2.0 * M_PI;
-
-        // Rotation gyro
-        //double d_theta_gyro = 0.0;
-        double d_theta_gyro = _current_gyro_z * dt;
-        _debug_angle.angle_imu += d_theta_gyro;
-        _debug_angle.angle_imu = normalize_angle(_debug_angle.angle_imu);
+        
         //while(_debug_angle.angle_imu > M_PI) _debug_angle.angle_imu -= 2.0 * M_PI;
         //while(_debug_angle.angle_imu < -M_PI) _debug_angle.angle_imu += 2.0 * M_PI;
   
@@ -757,12 +822,12 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         double weight_gyro = var_enc / (var_enc + var_gyro);
         double weight_enc = var_gyro / (var_enc + var_gyro);
         
-        double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc);
+        double d_theta_fused = (d_theta_gyro * weight_gyro) + (d_theta_enc * weight_enc); //CONTROLLO SLITTAMENTO SU ANGOLO
         //double d_theta_fused = (d_theta_gyro);
 
         // Calcolo varianze per update PXX
         //incertezza lineare
-        double motion_error_lin = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento
+        double motion_error_lin = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento RIVEDERE CALCOLO INCERTEZZE
         double sigma_ds = (motion_error_lin * abs(ds)) + (0.01*dt); // % del movimento + drift temporale
 
         // incertezza angolare
@@ -842,6 +907,10 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["accel_enc"] = _debug_slip.enc_accel;
         out["debug"]["accel_imu"] = _debug_slip.imu_accel;
         out["debug"]["is_slipping"] = _debug_slip.is_slipping ? 1.0 : 0.0;
+        out["debug"]["angle_diff"] = _debug_slip.angle_diff;
+        out["debug"]["angle_ratio"] = _debug_slip.angle_ratio;
+        out["debug"]["d_theta_enc"] = _debug_slip.d_theta_enc;
+        out["debug"]["d_theta_imu"] = _debug_slip.d_theta_imu;
         //out["debug"]["vel_imu"] = _debug_slip.imu_vel;
         //out["debug"]["vel_enc"] = _debug_slip.enc_vel;
        // out["debug"]["fused_velocity"] = fused_velocity;
