@@ -102,16 +102,22 @@ def main():
                 if "debug" in data:
                     th_enc = data["debug"]["angles"]["theta_enc"]
                     th_imu = data["debug"]["angles"]["theta_imu"]
-                    th_diff = data["debug"].get("angle_diff")
-                    if th_diff is not None: rr.log("debug/slip/angle_diff", Scalars(th_diff))
                     th_ratio = data["debug"].get("angle_ratio")
                     if th_ratio is not None: rr.log("debug/slip/angle_ratio", Scalars(th_ratio))
-                    d_th_enc = data["debug"].get("d_theta_enc")
-                    d_th_imu = data["debug"].get("d_theta_imu")
-                    if d_th_enc is not None: rr.log("debug/slip/d_theta_encoder", Scalars(d_th_enc))
-                    if d_th_imu is not None: rr.log("debug/slip/d_theta_imu", Scalars(d_th_imu))
+                    accel_ratio = data["debug"].get("accel_ratio")
+                    if accel_ratio is not None: rr.log("debug/slip/accel_ratio", Scalars(accel_ratio))
+                    ds = data["debug"].get("ds")
+                    ds_angle = data["debug"].get("ds_angle")
+                    ds_accel = data["debug"].get("ds_accel")
+                    ds_final = data["debug"].get("ds_final")
+                    if ds is not None: rr.log("debug/slip/ds", Scalars(ds))
+                    if ds_angle is not None: rr.log("debug/slip/ds_angle", Scalars(ds_angle))
+                    if ds_accel is not None: rr.log("debug/slip/ds_accel", Scalars(ds_accel))
+                    if ds_final is not None: rr.log("debug/slip/ds_final", Scalars(ds_final))
                     #avg_th_enc_imu = data["debug"]["angles"]["theta_fused_imu_enc"]
                     #th_fus = data["debug"].get("theta_fused")
+                    gyro_z = data["debug"].get("current_gyro_z")
+                    if gyro_z is not None: rr.log("debug/slip/current_gyro_z", Scalars(gyro_z))
 
                     if th_enc is not None: rr.log("debug/angles/theta_encoder", Scalars(th_enc))
                     if th_imu is not None: rr.log("debug/angles/theta_imu", Scalars(th_imu))
