@@ -56,9 +56,9 @@ echo "Avvio Source: IMU..."
 mads source replay.plugin -n "imu_source" &
 SRC_IMU_PID=$!
 
-#echo "Avvio Source: Ground Truth (HTC)..."
-#mads source replay.plugin -n "pose_htc_source" &
-#SRC_HTC_PID=$!
+echo "Avvio Source: Ground Truth (HTC)..."
+mads source replay.plugin -n "pose_htc_source" &
+SRC_HTC_PID=$!
 
 echo "Avvio Source: Ground Truth (RealSense)..."
 mads source replay.plugin -n "pose_rs_source" &

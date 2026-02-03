@@ -3,25 +3,22 @@ import json
 import rerun as rr
 import math
 import sys
+from rerun.archetypes import Scalars 
 
-# --- CONFIGURAZIONE GEOMETRICA ---
-# Angolo di rotazione tra Walker e Aruco/RealSense
-# Il diagramma suggerisce 135 gradi? Proviamolo.
-# 135 gradi in radianti = 135 * (3.14 / 180) = 2.356
-# Prova anche -135 (-2.356) o 45 (0.785) se non combacia.
-RS_YAW_OFFSET = 135.0 * (3.14159 / 180.0)
-
-# Offset di posizione (Distanza dal centro)
-# Se la camera è spostata rispetto al centro, inserisci qui i metri
+# --- CONFIGURAZIONE DEBUG ---
+SHOW_3D = True 
+RS_YAW_OFFSET = 0.0 
 RS_POS_OFFSET_X = 0.0 
-RS_POS_OFFSET_Y = 0.0
-# ---------------------------------
+RS_POS_OFFSET_Y = 0.0 
+# ----------------------------
 
 MADS_ENDPOINT = "tcp://localhost:9091"
-TOPICS = ["encoders_source", "pose_rs_source", "imu_source"]
+TOPIC_FILTER = ["odometry_filter", "pose_rs_source", "imu_source", "pose_htc_source"]
 
 def get_nested(data, path):
-    keys = path.strip("/").split("/")
+    if path in data: return data[path]
+    if path.startswith("/") and path[1:] in data: return data[path[1:]]
+    keys = path.strip("/").replace(".", "/").split("/")
     curr = data
     try:
         for k in keys:
@@ -36,39 +33,24 @@ def get_nested(data, path):
         return float(curr)
     except:
         return None
-
+    
 def rotate_point(x, y, theta):
-    """Ruota un punto (x,y) di un angolo theta."""
-    x_new = x * math.cos(theta) - y * math.sin(theta)
-    y_new = x * math.sin(theta) + y * math.cos(theta)
+    x_new = -(x * math.cos(theta) - y * math.sin(theta))
+    y_new = (x * math.sin(theta) + y * math.cos(theta))
     return x_new, y_new
 
 def main():
-    print(f"🚀 Visualizer: Test Rotazione {math.degrees(RS_YAW_OFFSET):.1f}°")
-    rr.init("MADS_Geometry_Check", spawn=True)
-    
+    print("Starting Python visualizer...")
+    rr.init("MADS_Replication_Python", spawn=True)
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
     socket.connect(MADS_ENDPOINT)
-    for t in TOPICS: 
-        socket.setsockopt_string(zmq.SUBSCRIBE, t)
-
-    # Accumulatori per le scie
-    path_odom = []
-    path_rs_raw = []
-    path_rs_aligned = []
-
-    # Stato Odometria (Integrata a mano per confronto)
-    odom_x, odom_y, odom_theta = 0.0, 0.0, 0.0
-    last_enc_l, last_enc_r = None, None
     
-    # Parametri Walker (per calcolare odom grezza)
-    R_L = 0.0873
-    R_R = 0.0857
-    BASELINE = 0.8291
-    TICKS = 4096.0
+    for topic in TOPIC_FILTER:
+        socket.setsockopt_string(zmq.SUBSCRIBE, topic)
+        print(f"Subscribed to topic: {topic}")
 
-    print("In attesa di dati...")
+    traj_rs_aligned = []
 
     while True:
         try:
@@ -77,87 +59,88 @@ def main():
             payload = msg[1].decode('utf-8')
             data = json.loads(payload)
 
-            # Tempo
             time_val = data.get("sim_time")
             if time_val is None: time_val = get_nested(data, "/message/timecode")
-            if time_val is not None:
-                rr.set_time_seconds("sim_time", float(time_val))
-
-            # --- 1. ODOMETRIA (Calcolata al volo per avere un riferimento) ---
-            if topic == "encoders_source":
-                # Leggi encoder
-                enc_l = get_nested(data, "/message/encoders/left")
-                enc_r = get_nested(data, "/message/encoders/right")
-                
-                if last_enc_l is not None and enc_l is not None:
-                    # Calcola delta movimento
-                    dl = ((enc_l - last_enc_l) / TICKS) * 2 * math.pi * R_L
-                    dr = ((enc_r - last_enc_r) / TICKS) * 2 * math.pi * R_R
-                    ds = (dr + dl) / 2.0
-                    dth = (dr - dl) / BASELINE
+            if time_val is not None: rr.set_time_seconds("sim_time", float(time_val))
+           
+            if topic == "odometry_filter":
+                if "pose" in data:
+                    pos = data["pose"]["position"]
+                    if not hasattr(main, "traj_pos"): main.traj_pos = []
+                    main.traj_pos.append(pos)                    
+                    rr.log("robot/FULL_EKF_body", rr.Points3D([pos], radii=0.04, colors=[255, 255, 0], labels="EKF"))
+                    rr.log("robot/FULL_EKF_path", rr.LineStrips3D([main.traj_pos], colors=[[255, 255, 0]], radii=0.01))
                     
-                    # Integra posizione (Semplice Eulero)
-                    odom_x += ds * math.cos(odom_theta)
-                    odom_y += ds * math.sin(odom_theta)
-                    odom_theta += dth
+                if "debug" in data:
+                    # Grafici Angoli
+                    if "theta_enc" in data["debug"]: rr.log("fusion/debug/theta_encoder", Scalars(data["debug"]["theta_enc"]))
+                    if "theta_imu" in data["debug"]: rr.log("fusion/debug/theta_imu", Scalars(data["debug"]["theta_imu"]))
                     
-                    pos = [odom_x, odom_y, 0.0]
-                    path_odom.append(pos)
-                    if len(path_odom) > 5000: path_odom.pop(0)
-                    
-                    # Disegna Odometria (RIFERIMENTO - Bianco/Grigio)
-                    rr.log("geometry/walker_odom", rr.LineStrips3D([path_odom], colors=[[200, 200, 200]], labels="Walker Frame (Odom)"))
+                    # Grafici Velocità
+                    if "v_fused" in data["debug"]: rr.log("fusion/debug/velocity_fused", Scalars(data["debug"]["v_fused"]))
 
-                if enc_l is not None:
-                    last_enc_l = enc_l
-                    last_enc_r = enc_r
+                    # Traiettorie Parziali
+                    if "raw_encoder_only" in data["debug"]:
+                        raw_pos = data["debug"]["raw_encoder_only"]
+                        if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
+                        main.traj_raw_enc.append(raw_pos)                    
+                        rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[255, 0, 0]], radii=0.01))
 
-            # --- 2. REALSENSE (Raw vs Aligned) ---
+                    if "partial_ekf" in data["debug"]:
+                        partial_pos = data["debug"]["partial_ekf"]
+                        if not hasattr(main, "traj_partial_ekf"): main.traj_partial_ekf = []
+                        main.traj_partial_ekf.append(partial_pos)                    
+                        rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[0, 255, 0]], radii=0.01))
+
+                    if "rs_center" in data["debug"]:
+                        rs_center = data["debug"]["rs_center"]
+                        if not hasattr(main, "traj_rs_center"): main.traj_rs_center = []
+                        main.traj_rs_center.append(rs_center)
+                        rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02))
+
+                    # Slip Check Graph
+                    acc_enc = data["debug"].get("accel_enc")
+                    acc_imu = data["debug"].get("accel_imu")
+                    is_slipping = data["debug"].get("is_slipping")
+                    if acc_enc is not None: rr.log("debug/slip/accel_encoder", Scalars(acc_enc))
+                    if acc_imu is not None: rr.log("debug/slip/accel_imu", Scalars(acc_imu))
+                    if is_slipping is not None: rr.log("debug/slip/is_slipping_flag", Scalars(is_slipping))
+
+            # HTC Ground Truth (Green)
+            elif topic == "pose_htc_source":
+                x = get_nested(data, "/message/pose/position/0")
+                y = get_nested(data, "/message/pose/position/1")
+                if x is not None and y is not None:
+                    pos = [float(x), float(y), 0.0]
+                    if not hasattr(main, "traj_ground_truth"): main.traj_ground_truth = []
+                    main.traj_ground_truth.append(pos)
+                    rr.log("robot/gt_path", rr.LineStrips3D([main.traj_ground_truth], colors=[[0, 255, 0]], radii=0.005))
+
+            # RealSense Raw (Cyan)
             elif topic == "pose_rs_source":
-                # Leggi posizione RealSense
-                rs_x = get_nested(data, "/message/pose/position/0/0")
-                rs_y = get_nested(data, "/message/pose/position/0/1")
+                # Lettura robusta (fix per NoneType error)
+                raw_x = get_nested(data, "/message/pose/position/0/0")
+                raw_y = get_nested(data, "/message/pose/position/0/1")
                 
-                if rs_x is None: # Fallback formato piatto
-                    rs_x = get_nested(data, "/message/pose/position/0")
-                    rs_y = get_nested(data, "/message/pose/position/1")
+                if raw_x is None: # Fallback
+                    raw_x = get_nested(data, "/message/pose/position/0")
+                    raw_y = get_nested(data, "/message/pose/position/1")
 
-                if rs_x is not None:
-                    # A. Dato Grezzo (Come arriva dal sensore)
-                    path_rs_raw.append([rs_x, rs_y, 0.0])
-                    if len(path_rs_raw) > 5000: path_rs_raw.pop(0)
-                    # Disegna Raw (Rosso - Errato)
-                    rr.log("geometry/realsense_raw", rr.LineStrips3D([path_rs_raw], colors=[[255, 0, 0]], labels="RS Raw"))
+                if raw_x is not None and raw_y is not None:
+                    # Applica segno solo se i dati esistono
+                    rs_x = raw_x
+                    rs_y = -raw_y 
 
-                    # B. Dato Allineato (Ruotato di 135 gradi)
-                    # Applichiamo la rotazione al punto
                     rot_x, rot_y = rotate_point(rs_x, rs_y, RS_YAW_OFFSET)
-                    
-                    # Aggiungiamo l'offset di traslazione (se serve)
                     aligned_x = rot_x + RS_POS_OFFSET_X
                     aligned_y = rot_y + RS_POS_OFFSET_Y
-                    
-                    path_rs_aligned.append([aligned_x, aligned_y, 0.0])
-                    if len(path_rs_aligned) > 5000: path_rs_aligned.pop(0)
-                    
-                    # Disegna Allineato (Verde - Corretto?)
-                    rr.log("geometry/realsense_aligned", rr.LineStrips3D([path_rs_aligned], colors=[[0, 255, 0]], labels=f"RS Rotated {math.degrees(RS_YAW_OFFSET):.0f}°"))
-
-            # --- 3. IMU (Solo per controllo) ---
-            elif topic == "imu_source":
-                # Gyro Z
-                gyro_z = get_nested(data, "/message/gyro/2")
-                if gyro_z is not None:
-                    try:
-                        from rerun.archetypes import Scalar
-                        rr.log("sensors/gyro_z", Scalar(gyro_z))
-                    except:
-                        pass
+                    traj_rs_aligned.append([aligned_x, aligned_y, 0.0])
+                    rr.log("geometry/realsense_raw", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 255]], radii=0.005))
 
         except KeyboardInterrupt:
             break
-        except Exception:
-            pass
+        except Exception as e:
+            pass # Ignora errori di parsing sporadici
 
 if __name__ == "__main__":
     main()

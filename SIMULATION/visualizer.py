@@ -8,27 +8,14 @@ from rerun.archetypes import Scalars
 # --- CONFIGURAZIONE DEBUG ---
 # Se vuoi vedere solo i grafici e non il 3D, metti False
 SHOW_3D = True 
-# Finestra per la media mobile (solo visualizzazione)
-SMOOTH_WINDOW = 10 
-RS_YAW_OFFSET = 0.0 * (3.14159 / 180.0)
-RS_POS_OFFSET_X = 0.0 
-RS_POS_OFFSET_Y = 0.0 
 
 
 # ----------------------------
 
 # Configurazione
 MADS_ENDPOINT = "tcp://localhost:9091"  #Broker port
-TOPIC_FILTER = ["odometry_filter", "pose_rs_source", "imu_source"]        #listening topic
+TOPIC_FILTER = ["odometry_filter"]        #listening topic
 
-class MovingAverage:
-    def __init__(self, size):
-        self.size = size
-        self.data = []
-    def update(self, val):
-        self.data.append(val)
-        if len(self.data) > self.size: self.data.pop(0)
-        return sum(self.data) / len(self.data)
     
 def get_nested(data, path):
     # 1. Prova accesso diretto (caso flattened)
@@ -52,12 +39,7 @@ def get_nested(data, path):
         return float(curr)
     except:
         return None
-    
-def rotate_point(x, y, theta):
-    """Ruota un punto (x,y) di un angolo theta."""
-    x_new = -(x * math.cos(theta) - y * math.sin(theta))
-    y_new = (x * math.sin(theta) + y * math.cos(theta))
-    return x_new, y_new
+
 
 def main():
     # 1. Start Rerun
@@ -75,25 +57,6 @@ def main():
         socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         print(f"Subscribed to topic: {topic}")
     
-    
-
-    traj_odometry = []
-    #traj_ground_truth = []
-    traj_rs = []
-    traj_rs_aligned = []
-
-    # Stato Odometria (Integrata a mano per confronto)
-    odom_x, odom_y, odom_theta = 0.0, 0.0, 0.0
-    last_enc_l, last_enc_r = None, None
-
-    R_L = 0.0873
-    R_R = 0.0857
-    BASELINE = 0.8291
-    TICKS = 4096.0
-
-       # Filtri per pulire i grafici
-    ma_gyro = MovingAverage(SMOOTH_WINDOW)
-    ma_fusion = MovingAverage(SMOOTH_WINDOW)
 
     while True:
         try:
@@ -109,46 +72,10 @@ def main():
             if time_val is None: time_val = get_nested(data, "/message/timecode")
             if time_val is not None: 
                 rr.set_time_seconds("sim_time", float(time_val))
-            """ 
-            # --- 1. ODOMETRIA (Calcolata al volo per avere un riferimento) ---
-            if topic == "encoders_source":
-                # Leggi encoder
-                enc_l = get_nested(data, "/message/encoders/left")
-                enc_r = get_nested(data, "/message/encoders/right")
-                
-                if last_enc_l is not None and enc_l is not None:
-                    # Calcola delta movimento
-                    dl = ((enc_l - last_enc_l) / TICKS) * 2 * math.pi * R_L
-                    dr = ((enc_r - last_enc_r) / TICKS) * 2 * math.pi * R_R
-                    ds = (dr + dl) / 2.0
-                    dth = (dr - dl) / BASELINE
-                    
-                    # Integra posizione (Semplice Eulero)
-                    odom_x += ds * math.cos(odom_theta)
-                    odom_y += ds * math.sin(odom_theta)
-                    odom_theta += dth
-                    
-                    pos = [odom_x, odom_y, 0.0]
-                    traj_odometry.append(pos)
-                    #if len(traj_odometry) > 5000: traj_odometry.pop(0)
-                    
-                    # Disegna Odometria (RIFERIMENTO - Bianco/Grigio)
-                    rr.log("geometry/walker_odom", rr.LineStrips3D([traj_odometry], colors=[[200, 200, 200]], labels="Walker Frame (Odom)"))
-                if enc_l is not None:
-                    last_enc_l = enc_l
-                    last_enc_r = enc_r
-            """
+           
             # Odometry Filter Trajectory - RED
             if topic == "odometry_filter":
-                """
-                if "pose" in data:
-                    raw_ekf = data["pose"]["orientation"]["yaw"]
-                    if offset_ekf is None: offset_ekf = raw_ekf
-                        
-                    norm_ekf = raw_ekf - offset_ekf
-                    rr.log("debug/compare_yaw/4_ekf_norm", rr.Scalars(norm_ekf))
-                """
-                    
+                """ 
                 if SHOW_3D and "pose_vector" in data:
                     pos = data["pose_vector"] # [x, y, z]
                     traj_odometry.append(pos)
@@ -161,27 +88,84 @@ def main():
                     rr.log("robot/est_body", rr.Points3D([pos], radii=0.03, colors=[255, 0, 0], labels="Odom"))
                     # Scia
                     rr.log("robot/est_path", rr.LineStrips3D([traj_odometry], colors=[[255, 0, 0]], radii=0.005))
+                """
+                if "pose" in data:
+                     # FULL EKF PURA        
+                    pos = data["pose"]["position"]
+                    # Usiamo un nome univoco per la scia raw
+                    if not hasattr(main, "traj_pos"): main.traj_pos = []
+                    main.traj_pos.append(pos)                    
+                    rr.log("robot/FULL_EKF_body", rr.Points3D([pos], radii=0.04, colors=[255, 255, 0], labels="EKF"))
+                    rr.log("robot/FULL_EKF_path", rr.LineStrips3D([main.traj_pos], colors=[[255, 255, 0]], radii=0.01)) #sistema colore
                     
                 # NUOVO: Grafico Comparativo Angoli (Chi comanda?)
                 if "debug" in data:
-                    th_enc = data["debug"].get("theta_enc")
-                    th_imu = data["debug"].get("theta_imu")
+                    th_enc = data["debug"]["angles"]["theta_enc"]
+                    th_imu = data["debug"]["angles"]["theta_imu"]
+                    th_ratio = data["debug"].get("angle_ratio")
+                    if th_ratio is not None: rr.log("debug/slip/angle_ratio", Scalars(th_ratio))
+                    accel_ratio = data["debug"].get("accel_ratio")
+                    if accel_ratio is not None: rr.log("debug/slip/accel_ratio", Scalars(accel_ratio))
+                    ds = data["debug"].get("ds")
+                    ds_angle = data["debug"].get("ds_angle")
+                    ds_accel = data["debug"].get("ds_accel")
+                    ds_final = data["debug"].get("ds_final")
+                    if ds is not None: rr.log("debug/slip/ds", Scalars(ds))
+                    if ds_angle is not None: rr.log("debug/slip/ds_angle", Scalars(ds_angle))
+                    if ds_accel is not None: rr.log("debug/slip/ds_accel", Scalars(ds_accel))
+                    if ds_final is not None: rr.log("debug/slip/ds_final", Scalars(ds_final))
+                    #avg_th_enc_imu = data["debug"]["angles"]["theta_fused_imu_enc"]
                     #th_fus = data["debug"].get("theta_fused")
+                    gyro_z = data["debug"].get("current_gyro_z")
+                    if gyro_z is not None: rr.log("debug/slip/current_gyro_z", Scalars(gyro_z))
+
+                    if th_enc is not None: rr.log("debug/angles/theta_encoder", Scalars(th_enc))
+                    if th_imu is not None: rr.log("debug/angles/theta_imu", Scalars(th_imu))
+                    #if avg_th_enc_imu is not None: rr.log("debug/angles/theta_fused_imu_enc", Scalars(avg_th_enc_imu))
                     
-                    if th_enc is not None: rr.log("fusion/debug/theta_encoder", Scalars(th_enc))
-                    if th_imu is not None: rr.log("fusion/debug/theta_imu", Scalars(th_imu))
+                    #if "theta_enc" in data["debug"]: rr.log("fusion/debug/theta_encoder", Scalars(data["debug"]["theta_enc"]))
+                    #if "theta_imu" in data["debug"]: rr.log("fusion/debug/theta_imu", Scalars(data["debug"]["theta_imu"]))
                     #if th_fus is not None: rr.log("fusion/debug/theta_fused", Scalars(th_fus))
+
+                    if "fused_velocity" in data["debug"]:
+                        rr.log("fusion/debug/velocity_fused", Scalars(data["debug"]["fused_velocity"]))
                 
-                    # Posizion from raw encoders only            
+                    # ODOMETRIA PURA        
                     raw_pos = data["debug"]["raw_encoder_only"]
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_raw_enc"): main.traj_raw_enc = []
+                    main.traj_raw_enc.append(raw_pos)                    
+                    rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[255, 0, 0], labels="Odometry"))
+                    rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[255, 0, 0]], radii=0.01))
+
+                     # partial ekf        
+                    partial_pos = data["debug"]["partial_ekf"]
+                    # Usiamo un nome univoco per la scia raw
+                    if not hasattr(main, "traj_partial_ekf"): main.traj_partial_ekf = []
+                    main.traj_partial_ekf.append(partial_pos)                    
+                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[0, 255, 0], labels="Partial EKF"))
+                    rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[0, 255, 0]], radii=0.01))
+
+                     # Aruco data      
+                    rs_center = data["debug"]["rs_center"]
+                    if not hasattr(main, "traj_rs_center"): main.traj_rs_center = []
+                    main.traj_rs_center.append(rs_center)
+                    rr.log("robot/rs_center_path", rr.LineStrips3D([main.traj_rs_center], colors=[[0, 255, 255]], radii=0.01))
+                    rr.log("robot/rs_center_debug", rr.LineStrips3D([[rs_center[0], rs_center[1], 0.0]], colors=[[0, 255, 255]], radii=0.02, labels="RS Center Path"))
+
                     
-                    main.traj_raw_enc.append(raw_pos)
-                    #if len(main.traj_raw_enc) > 6000: main.traj_raw_enc.pop(0)
+                    # Htc position
+                    if "htc_position" in data["debug"]:
+                        htc_pos = data["debug"]["htc_position"]
+                        if not hasattr(main, "traj_htc_position"): main.traj_htc_position = []
+                        main.traj_htc_position.append(htc_pos)
+                        rr.log("robot/htc_position_path", rr.LineStrips3D([main.traj_htc_position], colors=[[0, 255, 0]], radii=0.01))
+                        rr.log("robot/htc_position_debug", rr.Points3D([htc_pos], colors=[[0, 255, 0]], radii=0.02, labels="HTC"))
+                        htc_angle = data["debug"]["angles"]["htc_angle"]
+                        if htc_angle is not None:
+                            rr.log("debug/angles/htc_angle", Scalars(htc_angle))
                     
-                    rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[150, 150, 150], labels="Raw Enc"))
-                    rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[150, 150, 150]], radii=0.01))
+
 
                     # Acceleration from enc vs imu
                     acc_enc = data["debug"].get("accel_enc")
@@ -191,102 +175,42 @@ def main():
                     if acc_imu is not None: rr.log("debug/slip/accel_imu", Scalars(acc_imu))
                     if is_slipping is not None: rr.log("debug/slip/is_slipping_flag", Scalars(is_slipping))
 
-                """
-                # Ground Truth Trajectory from HTC - GREEN
-                elif topic == "pose_htc_source":
-                    x = get_nested(data, "/message/pose/position/0")
-                    y = get_nested(data, "/message/pose/position/1")
-                    z = get_nested(data, "/message/pose/position/2")
-                        
-                    if x is not None and y is not None:
-                        pos = [float(x), float(y), float(z) if z else 0.0]
-                        traj_ground_truth.append(pos)
-                        if len(traj_ground_truth)>6000: traj_ground_truth.pop(0)
-                        rr.log("robot/gt_body", rr.Points3D([pos], radii=0.03, colors=[0, 255, 0], labels="GT"))
-                        rr.log("robot/gt_path", rr.LineStrips3D([traj_ground_truth], colors=[[0, 255, 0]], radii=0.005))
-                """
+                    # velocity from enc vs imu
+                    #vel_enc = data["debug"].get("vel_enc")
+                    #vel_imu = data["debug"].get("vel_imu")
+                    vel_fused = data["debug"].get("fused_velocity")
+                    is_slipping = data["debug"].get("is_slipping")
+                    #if vel_enc is not None: rr.log("debug/slip/vel_encoder", Scalars(vel_enc))
+                    #if vel_imu is not None: rr.log("debug/slip/vel_imu", Scalars(vel_imu))
+                    if vel_fused is not None: rr.log("debug/slip/vel_fused", Scalars(vel_fused))
+
+                    #ang_rs_raw = get_nested(data, "/debug/angles/rs_raw")
+                    ang_rs = get_nested(data, "/debug/angles/theta_rs")
+                    ang_fused = get_nested(data, "/debug/angles/fused_full")
+                    ang_fused_partial = get_nested(data, "/debug/angles/fused_partial")
+                    #ang_enc_only = get_nested(data, "/debug/angles/enc_only")
+                    #ang_ekf_rs = get_nested(data, "/debug/angles/ekf_rs")
+
+                    #if ang_rs_raw is not None: rr.log("debug/angles/rs_raw", Scalars(ang_rs_raw))
+                    if ang_rs is not None: rr.log("debug/angles/theta_rs", Scalars(ang_rs))
+                    if ang_fused is not None: rr.log("debug/angles/fused_full", Scalars(ang_fused))
+                    if ang_fused_partial is not None: rr.log("debug/angles/fused_partial", Scalars(ang_fused_partial))
+                    #if ang_enc_only is not None: rr.log("debug/angles/enc_only", Scalars(ang_enc_only))
+                    #if ang_ekf_rs is not None: rr.log("debug/angles/ekf_rs", Scalars(ang_ekf_rs))
                 
 
-            # RealSense Trajectory - CYAN
-            elif topic == "pose_rs_source":
-                # Leggi posizione RealSense
-                rs_x = get_nested(data, "/message/pose/position/0/0")
-                rs_y = get_nested(data, "/message/pose/position/0/1")
-                
-                if rs_x is None: # Fallback formato piatto
-                    rs_x = get_nested(data, "/message/pose/position/0")
-                    rs_y = get_nested(data, "/message/pose/position/1")
+                if "evaluation" in data:
+                    err_dist = data["evaluation"].get("current_error_distance")
+                    err_theta = data["evaluation"].get("current_error_theta")
+                    rmse_dist = data["evaluation"].get("rmse_dist")
+                    rmse_theta = data["evaluation"].get("rmse_theta")
+                    std_dist = data["evaluation"].get("std_dist")
 
-                if rs_x is not None:
-                    # A. Dato Grezzo (Come arriva dal sensore)
-                    traj_rs.append([rs_x, rs_y, 0.0])
-                    #if len(traj_rs) > 5000: traj_rs.pop(0)
-                    # Disegna Raw (Rosso - Errato)
-                    rr.log("geometry/realsense_raw", rr.LineStrips3D([traj_rs], colors=[[255, 0, 0]], labels="RS Raw"))
-
-                    # B. Dato Allineato (Ruotato di 135 gradi)
-                    # Applichiamo la rotazione al punto
-                    rot_x, rot_y = rotate_point(rs_x, rs_y, RS_YAW_OFFSET)
-                    
-                    # Aggiungiamo l'offset di traslazione (se serve)
-                    aligned_x = rot_x + RS_POS_OFFSET_X
-                    aligned_y = rot_y + RS_POS_OFFSET_Y
-                    
-                    traj_rs_aligned.append([aligned_x, aligned_y, 0.0])
-                    #if len(traj_rs_aligned) > 5000: traj_rs_aligned.pop(0)
-                    
-                    # Disegna Allineato (Verde - Corretto?)
-                    rr.log("geometry/realsense_aligned", rr.LineStrips3D([traj_rs_aligned], colors=[[0, 255, 0]], labels=f"RS Rotated {math.degrees(RS_YAW_OFFSET):.0f}°"))
-                    
-                
-
-            # IMU Data Visualization - GRAPHS
-            elif topic == "imu_source":
-                """
-                # Imu left
-                acc_l_x = get_nested(data, "/message/imu/left/accelerations/x")
-                acc_l_y = get_nested(data, "/message/imu/left/accelerations/y")
-                if acc_l_x is not None: rr.log("sensors/imu/left/acc/x", Scalars(acc_l_x))
-                if acc_l_y is not None: rr.log("sensors/imu/left/acc/y", Scalars(acc_l_y))
-
-                # Imu middle
-                gyro_z = get_nested(data, "/message/imu/middle/gyroscopes/z")
-                if gyro_z is not None: rr.log("sensors/imu/middle/gyro/z", Scalars(gyro_z))
-
-                # Imu right
-                acc_r_x = get_nested(data, "/message/imu/right/accelerations/x")
-                if acc_r_x is not None: rr.log("sensors/imu/right/acc/x", Scalars(acc_r_x))
-                
-                # Accelerometro: message -> accel -> [x, y, z]
-                acc_x = get_nested(data, "/message/accel/0")
-                acc_y = get_nested(data, "/message/accel/1")
-                """
-                # Giroscopio: message -> gyro -> [x, y, z] (Z è l'indice 2)
-                gyro_z = get_nested(data, "/message/gyro/2")
-                if gyro_z is not None:
-                    try:
-                        rr.log("sensors/imu/gyro/z_inverted", Scalars(-gyro_z))
-                    except:
-                        pass
-
-                """ 
-                if acc_x is not None: rr.log("sensors/imu/acc/x", Scalars(acc_x))
-                if acc_y is not None: rr.log("sensors/imu/acc/y", Scalars(acc_y))
-
-                # NUOVO: Plotta la "FusionPose" interna del chip
-                fusion_yaw = get_nested(data, "/message/fusionPose/2")
-                if fusion_yaw is not None:
-                    # Logghiamo sia raw che smooth
-                    rr.log("debug/absolute_angle/fusion_yaw_raw", Scalars(fusion_yaw))
-                    rr.log("debug/absolute_angle/fusion_yaw_smooth", Scalars(ma_fusion.update(fusion_yaw)))
-                
-                mag_x = get_nested(data, "/message/compass/0")
-                mag_y = get_nested(data, "/message/compass/1")
-                if mag_x is not None: rr.log("debug/magnetometer/x", Scalars(mag_x))
-                if mag_y is not None: rr.log("debug/magnetometer/y", Scalars(mag_y))
-                """ 
-
-
+                    if err_dist is not None: rr.log("evaluation/error_distance", Scalars(err_dist))
+                    if err_theta is not None: rr.log("evaluation/error_theta", Scalars(err_theta))
+                    if rmse_dist is not None: rr.log("evaluation/rmse_distance", Scalars(rmse_dist))
+                    if rmse_theta is not None: rr.log("evaluation/rmse_theta", Scalars(rmse_theta))
+                    if std_dist is not None: rr.log("evaluation/std_distance", Scalars(std_dist))
                 
 
         except KeyboardInterrupt:

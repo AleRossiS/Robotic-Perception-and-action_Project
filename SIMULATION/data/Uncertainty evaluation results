@@ -1,0 +1,59 @@
+BackLeft
+
+Messages processed: 1991 total, 0 with errors ---- Calibration Status ----
+sigma_acc (Media X/Y) 0.011921(consigliato dinamico * 3)
+Sigma gyro: 0.00100044(Consigliato dinamico * 2)
+sigma_rsx (Pos): 0.000242405 m
+sigma_rsy (Pos): 0.000157367 m
+sigma_rstheta (Pos): 1.84889e-32 rad
+
+
+BackRight
+
+Messages processed: 1989 total, 0 with errors ---- Calibration Status ----
+sigma_acc (Media X/Y) 0.0120253(consigliato dinamico * 3)
+Sigma gyro: 0.00101493(Consigliato dinamico * 2)
+sigma_rsx (Pos): 0.000409363 m
+sigma_rsy (Pos): 0.00169839 m
+sigma_rstheta (Pos): 0.00213584 rad
+
+
+FrontLeft
+
+Messages processed: 1989 total, 0 with errors ---- Calibration Status ----
+sigma_acc (Media X/Y) 0.0161984(consigliato dinamico * 3)
+Sigma gyro: 0.00094806(Consigliato dinamico * 2)
+sigma_rsx (Pos): 0.000597529 m
+sigma_rsy (Pos): 0.00276629 m
+sigma_rstheta (Pos): 0.0035135 rad
+
+
+FrontRight
+
+Messages processed: 1866 total, 0 with errors ---- Calibration Status ----
+sigma_acc (Media X/Y) 0.0105029(consigliato dinamico * 3)
+Sigma gyro: 0.000994349(Consigliato dinamico * 2)
+sigma_rsx (Pos): 0.000488982 m
+sigma_rsy (Pos): 0.00624973 m
+sigma_rstheta (Pos): 0.00795915 rad
+
+
+Media dei valori:
+
+sigma_Acc = (0.011921+0.0120253+0.0161984+0.0105029)/4 = 0.0126619
+Sigma gyro = (0.00100044+0.00101493+0.00094806+0.000994349)/4 = 0.000989445
+sigma_rsx = (0.000242405+0.000157367+0.000597529+0.000488982)/4 = 0.000371571
+sigma_rsy = (0.000157367+0.00169839+0.00276629+0.00624973)/4 = 0.002717944
+sigma_rstheta = (1.84889e-32+0.00213584+0.0035135+0.00795915)/4 = 0.003402123
+
+chosen values:
+sigma_acc * 5 = 0.0633095 ~ 0.065
+sigma_gyro * 2 = 0.00197889 ~ 0.002
+sigma_rs too optimistic, keeping 5 cm to avoid zig zag = 0.05
+sigma_rs_theta = 0.05
+
+
+
+
+
+

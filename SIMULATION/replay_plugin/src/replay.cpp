@@ -77,10 +77,10 @@ public:
             time_found = true;
         }
         // search for "timecode"
-        else if (flat.contains("/timecode") && flat["/timecode"].is_number()) {
-            current_sim_time = flat["/timecode"].get<double>();
-            time_found = true;
-        }
+        //else if (flat.contains("/timecode") && flat["/timecode"].is_number()) {
+        //    current_sim_time = flat["/timecode"].get<double>();
+        //    time_found = true;
+        //}
 
         // time synchronization
 
