@@ -15,13 +15,14 @@
 /*
 # FINAL EKF: WEIGHTED SENSOR FUSION
 # Approach:
-# 1. Calculate Rotation from Encoders (High drift on turns)
+# 1. Calculate Position and Rotation from Encoders (High drift on turns, slipping issues...)
 # 2. Calculate Rotation from Gyro (Drift over time, precise on turns)
-# 3. Fuse them based on Variance (Confidence)
-# 4. Use RealSense for absolute Position Correction
+# 3. Correction of slipping based on both pure acceleration and turning rate
+# 4. Prediction of position and update of covariance matrix
+# 5. Update of Kalman filter based on Aruco for absolute Position Correction
 */
 // Mandatory included headers
-#include <filter.hpp>
+#include <filter.hpp> 
 #include <nlohmann/json.hpp>
 #include <pugg/Kernel.h>
 
@@ -133,9 +134,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
 //MOST VALUES ARE DECLARED HERE, BUT SOME ARE REDEFINED IN THE MADS.INI FILE
     // Parametri Cinematici (Calibrati)
     struct Params {
-        double wheel_radius_left = 0.0873;  // RL [m] (Esempio, da calibrare)
+        double wheel_radius_left = 0.0873;  // RL [m] 
         double wheel_radius_right = 0.0857; // RR [m]
-        double baseline = 0.8291;          // B [m] No baseline needed with gyro
+        double baseline = 0.8291;          // B [m] 
         double ticks_per_rev = 4096;     // Risoluzione Encoder
 
         // kalman tuning
@@ -144,19 +145,19 @@ class Odometry_filterPlugin : public Filter<json, json> {
         double sigma_rs_pos = 0.05;  // RealSense uncertainty
         double sigma_rs_ang = 0.05;  // RealSense angle uncertainty
         double sigma_acc = 0.065; // accelerometer uncertainty
-        double sigma_enc_lin = 0.05; // Errore encoder lineare (m/s)
+        //double sigma_enc_lin = 0.05; // Errore encoder lineare (m/s)
         double sigma_enc_rot = 0.2;  // Errore encoder rotazionale (rad/s)
         double sigma_gyro = 0.002; // Errore giroscopio (rad/s)
 
         //double slip_accel_thresh = 0.5; // Soglia accelerazione per slip
-        double min_imu_accel_for_correction = 0.05;    // Soglia per considerare ferm
+        double min_imu_accel_for_correction = 0.05;    // Soglia per considerare fermo
         bool enable_slip_check = false;
         //double slip_accel_ratio = 1.5;   // Rapporto accel a_enc / a_imu
         double alpha_a = 0.15;
         double alpha_v = 0.10;
-        double slip_ratio = 1.5;
+        //double slip_ratio = 1.5;
 
-        int filter_window_rs = 5;
+        //int filter_window_rs = 5;
         int filter_window_imu = 10;  
         int filter_window_enc = 10; // Finestra per accelerometro    
 
@@ -191,9 +192,9 @@ class Odometry_filterPlugin : public Filter<json, json> {
     double _prev_ds = 0.0;
 
     // Moving Average Filters
-    MovingAverage _filter_rs_x; //Non uso
-    MovingAverage _filter_rs_y; //Non uso
-    MovingAverage _filter_rs_theta; //Non uso
+    //MovingAverage _filter_rs_x; //Non uso
+    //MovingAverage _filter_rs_y; //Non uso
+    //MovingAverage _filter_rs_theta; //Non uso
 
     //MovingAverage _filter_enc_v; // Rimosso, uso filtro esponenziale inline
     MovingAverage _filter_enc_a; // filtro ibrido per accelerazione encoder
@@ -288,14 +289,14 @@ public:
   }
 
   Odometry_filterPlugin() : 
-    _filter_rs_x(_conf.filter_window_rs), //Should not be too big
-    _filter_rs_y(_conf.filter_window_rs), //Should not be too big
-    _filter_rs_theta(_conf.filter_window_rs), //Should not be too big
-    _filter_gyro(_conf.filter_window_imu), //Aumento?
-    _filter_accel(_conf.filter_window_imu),//Aumento?
+    //_filter_rs_x(_conf.filter_window_rs), //Should not be too big
+    //_filter_rs_y(_conf.filter_window_rs), //Should not be too big
+    //_filter_rs_theta(_conf.filter_window_rs), //Should not be too big
+    _filter_gyro(_conf.filter_window_imu), 
+    _filter_accel(_conf.filter_window_imu),
     //_filter_enc_v(10),
-    _filter_enc_a(_conf.filter_window_enc),//Aumento?
-    _filter_enc_theta(10)
+    _filter_enc_a(_conf.filter_window_enc),
+    _filter_enc_theta(_conf.filter_window_enc)
     {}
   
   // -- Funzione di predizione EKF
@@ -328,7 +329,7 @@ void ekf_predict(State &s, double ds, double d_theta, double sigma_ds, double si
   // PREDIZIONE COVARIANZA: P = F * P * F^T + Q
   s.P = (F * s.P * F.transpose()) + Q;
 
-}  // rivedere incertezza dello stato, ad ogni stato l'incertezza deve essere aggiornata!!!
+}  
 
 // calculate std deviation
   double std_dev(const std::vector<double>& data) {
@@ -352,19 +353,18 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
   // Z = Misura [x, y, theta]
   // R Covarianza Misura
 
-  Vector3d y = z - s.x; 
-
+  Vector3d y = z - s.x; //differenza posizione e angolo tra predizione e aggiornamento
   y(2) = normalize_angle(y(2));
 
   Matrix3d H = Matrix3d::Identity();
   Matrix3d S = H * s.P * H.transpose() + R;
-  Matrix3d K = s.P * H.transpose() * S.inverse();
+  Matrix3d K = s.P * H.transpose() * S.inverse(); // Guadagno di Kalman
 
-  s.x = s.x + K * y;
+  s.x = s.x + K * y; // aggiornamento stato in base al kalman gain
   s.x(2) = normalize_angle(s.x(2));
 
   Matrix3d I = Matrix3d::Identity();
-  s.P = (I - K * H) * s.P;
+  s.P = (I - K * H) * s.P; // aggiornamento covarianza
 }
   // into the output json object
  return_type load_data(const json &in, std::string topic = "") override {
@@ -626,7 +626,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         _has_new_encoder_data = false;
 
         double dt = current_dt;
-        if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
+        //if (dt <= 1e-6) dt = 1e-6; // Prevenzione divisione per zero
         _prev_time = _last_timecode_enc;
 
         // --- PREDICTION ---
@@ -651,7 +651,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         double a_imu_final = _filter_accel.update(_imu_accel_smooth_ema2);
 
         bool is_slipping = false;
-        double accel_diff = abs(a_enc_sma - a_imu_final);
+        //double accel_diff = abs(a_enc_sma - a_imu_final);
 
 
         // rotation encoder
@@ -669,7 +669,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         //double dtheta_diff = abs(d_theta_enc - d_theta_gyro);
 
-        _debug_slip.angle_ratio = 1.0;
+        _debug_slip.angle_ratio = 1.0; //questi valori li utilizzo per visionare il comportamento dei rapporti acc e angolo e come viene aggiornato ds in base a essi
         _debug_slip.accel_ratio = 1.0;
         _debug_slip.ds = ds;
 
@@ -691,15 +691,15 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         if(abs(a_imu_final) > _conf.min_imu_accel_for_correction){
           _debug_slip.accel_ratio = abs(a_enc_sma) / abs(a_imu_final);
-          if(_debug_slip.accel_ratio > 2.5) _debug_slip.accel_ratio = 2.5; // Limite massimo
-          if(_debug_slip.accel_ratio < 0.25) _debug_slip.accel_ratio = 0.25; // Limite minimo
+          if(_debug_slip.accel_ratio > 2.5) _debug_slip.accel_ratio = 2.5;
+          if(_debug_slip.accel_ratio < 0.25) _debug_slip.accel_ratio = 0.25;
           ds_accel = ds / _debug_slip.accel_ratio;
         } 
 
-        if(abs(_current_gyro_z) < turn_threshold) blend_factor = 0.0;
-        else if(abs(_current_gyro_z) >= turn_threshold * 4) blend_factor = 1.0;
+        if(abs(_current_gyro_z) < turn_threshold) blend_factor = 0.0;// se siamo in movimento rettilineo, fidarsi solamente del rapporto accelerazioni
+        else if(abs(_current_gyro_z) >= turn_threshold * 4) blend_factor = 1.0;// se siamo in curva stretta (> 12 deg/s) fidarsi solamente del rapporto angoli
         else{
-          blend_factor = (abs(_current_gyro_z) - turn_threshold) / (turn_threshold * 4.0);
+          blend_factor = (abs(_current_gyro_z) - turn_threshold) / (turn_threshold * 4.0); // condizione intermedia
         }
 
           
@@ -710,7 +710,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
             
             ds_fused = (ds_angle * blend_factor) + (ds_accel * (1.0 - blend_factor));
 
-            if(abs(ds - ds_fused) > (abs(ds) * 0.1)){
+            if(abs(ds - ds_fused) > (abs(ds) * 0.1)){// se la variazione è superiore al 10% del movimento, consideriamo che stiamo slittando
                 ds = ds_fused;
                 is_slipping = true;
             }
@@ -737,8 +737,8 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
         // Calcolo varianze per update PXX
         //incertezza lineare
-        double motion_error_lin = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento RIVEDERE CALCOLO INCERTEZZE
-        double sigma_ds = (motion_error_lin * abs(ds)) + (0.01*dt); // % del movimento + drift temporale
+        double motion_error_lin = is_slipping ? 0.5 : _conf.sigma_v; // Aumenta incertezza se slittamento
+        double sigma_ds = (motion_error_lin * abs(ds)) + (0.01*dt); // incertezza in base al movimento + drift temporale
 
         // incertezza angolare
         //double combined_sigma = sqrt(pow(_conf.sigma_gyro * weight_gyro, 2) + pow(_conf.sigma_enc_rot * weight_enc, 2));
@@ -807,7 +807,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
         out["debug"]["raw_encoder_only"] = std::vector<double>{_state_enc_only.x, _state_enc_only.y, 0.0};
 
         // Partial EKF (odom + imu)
-        out["debug"]["partial_ekf"] = std::vector<double>{_state_partial.x(0), _state_partial.x(1), 0.0};
+        out["debug"]["Odom_corrected"] = std::vector<double>{_state_partial.x(0), _state_partial.x(1), 0.0};
 
         // Full EKF
         out["pose"]["position"] = std::vector<double>{_state.x(0), _state.x(1), 0.0};
@@ -875,7 +875,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     if(p.contains("sigma_v")) _conf.sigma_v = p["sigma_v"];
     if(p.contains("sigma_w")) _conf.sigma_w = p["sigma_w"];
     if(p.contains("sigma_acc")) _conf.sigma_acc = p["sigma_acc"];
-    if(p.contains("sigma_enc_lin")) _conf.sigma_enc_lin = p["sigma_enc_lin"];
+    //if(p.contains("sigma_enc_lin")) _conf.sigma_enc_lin = p["sigma_enc_lin"];
     if(p.contains("sigma_enc_rot")) _conf.sigma_enc_rot = p["sigma_enc_rot"];
     if(p.contains("sigma_gyro")) _conf.sigma_gyro = p["sigma_gyro"];
     if(p.contains("sigma_rs_pos")) _conf.sigma_rs_pos = p["sigma_rs_pos"];
@@ -883,7 +883,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     
     if(p.contains("alpha_a")) _conf.alpha_a = p["alpha_a"];
     if(p.contains("alpha_v")) _conf.alpha_v = p["alpha_v"];
-    if(p.contains("slip_ratio")) _conf.slip_ratio = p["slip_ratio"];
+    //if(p.contains("slip_ratio")) _conf.slip_ratio = p["slip_ratio"];
  
     
 
@@ -894,7 +894,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
 
     if( p.contains("filter_window_imu")) _conf.filter_window_imu = p["filter_window_imu"];
     if( p.contains("filter_window_enc")) _conf.filter_window_enc = p["filter_window_enc"];
-    if(p.contains("filter_window_rs")) _conf.filter_window_rs = p["filter_window_rs"];
+    //if(p.contains("filter_window_rs")) _conf.filter_window_rs = p["filter_window_rs"];
     //if( p.contains("invert_gyro")) _conf.invert_gyro = p["invert_gyro"];
 
     //if (p.contains("slip_accel_thresh")) _conf.slip_accel_thresh = p["slip_accel_thresh"];
@@ -924,7 +924,7 @@ void ekf_update(State &s, const Vector3d &z, const Matrix3d &R) {
     _prev_raw_rs_x = -9999.0;
     _prev_raw_rs_y = -9999.0;
     //_first_rs_frame = true;
-    _rs_theta_unwrapped = 0.0;
+    //_rs_theta_unwrapped = 0.0;
     //_prev_rs_theta_raw = 0.0;
     //fused_velocity = 0.0;
       
@@ -944,19 +944,19 @@ private:
 
   // Define the fields that are used to store internal resources
   //double _prev_rs_theta_raw = 0.0;
-  double _rs_theta_unwrapped = 0.0;
+  //double _rs_theta_unwrapped = 0.0;
   //bool _first_rs_frame = true;
 
   double _last_input_rs_theta = 0.0;
   //bool _aruco_valid_for_vis = false;
 
-  double est_rs_x = 0.0;
-  double est_rs_y = 0.0;
+  //double est_rs_x = 0.0;
+  //double est_rs_y = 0.0;
 
   //double fused_velocity = 0.0;
   double v_enc = 0.0;
-  double v_imu = 0.0;
-  double prev_imu_vel = 0.0;
+  //double v_imu = 0.0;
+  //double prev_imu_vel = 0.0;
  
   
 

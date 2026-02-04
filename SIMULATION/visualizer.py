@@ -138,12 +138,12 @@ def main():
                     rr.log("robot/raw_encoder_body", rr.Points3D([raw_pos], radii=0.04, colors=[255, 0, 0], labels="Odometry"))
                     rr.log("robot/raw_encoder_path", rr.LineStrips3D([main.traj_raw_enc], colors=[[255, 0, 0]], radii=0.01))
 
-                     # partial ekf        
-                    partial_pos = data["debug"]["partial_ekf"]
+                     # Odom corrected        
+                    partial_pos = data["debug"]["Odom_corrected"]
                     # Usiamo un nome univoco per la scia raw
                     if not hasattr(main, "traj_partial_ekf"): main.traj_partial_ekf = []
                     main.traj_partial_ekf.append(partial_pos)                    
-                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[0, 255, 0], labels="Partial EKF"))
+                    rr.log("robot/partial_ekf_body", rr.Points3D([partial_pos], radii=0.04, colors=[0, 255, 0], labels="Odom_corrected"))
                     rr.log("robot/partial_ekf_path", rr.LineStrips3D([main.traj_partial_ekf], colors=[[0, 255, 0]], radii=0.01))
 
                      # Aruco data      
