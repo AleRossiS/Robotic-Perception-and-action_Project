@@ -58,7 +58,7 @@ MADS.INI FILE MODIFICATION
 The professor made us use the mads.ini file inside the core of our computer. The problem is, if many of us are working on the same simulator, we cannot update for each other the mads.ini file. This creates a gap in the versions and everyone should have to manually update their own file. 
 To avoid this, we tell Mads that he must use a local file, instead of the predifined one. Follow the next steps:
 
-To locate wherethefitis try simply writing in terminal:
+To locate where is it, try simply writing in terminal:
 
 mads ini -i
 
